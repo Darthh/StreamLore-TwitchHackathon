@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { get } from 'node:http';
 import express from 'express';
 import { createViewerListener, type ChatQuestion } from '../server/everywhere.ts';
-import { communitySlang } from '../server/community-lore.ts';
+import { communities, communitySlang } from '../server/community-lore.ts';
 import { createWhisperLimiter, loreQuestion } from '../server/whispers.ts';
 import { createTwitchOAuthWithDatabase } from '../server/oauth-core.ts';
 import type { SqlDatabase } from '../server/sql-database.ts';
@@ -55,6 +55,24 @@ test('slang answers prefer the channel being watched, then name the community a 
   assert.equal(communitySlang('92038375', 'whats a juicer')?.community, 'xQc');
   assert.equal(communitySlang('12345', 'who is sally')?.entry.term, 'Sally');
   assert.equal(communitySlang('71092938', 'whats up chat'), undefined);
+});
+
+test('the top-streamer dataset answers each community’s phrase in its own chat, with no phrase claimed twice', () => {
+  const asked: [string, string, string, string][] = [
+    ['411377640', 'who is junko', 'Junko', 'Jynxzi'],
+    ['641972806', 'whats the kai mafia', 'Mafia', 'Kai Cenat'],
+    ['641972806', 'what is a mafiathon?', 'Mafiathon', 'Kai Cenat'],
+    ['220476955', 'whats sewey', 'Sewey', 'IShowSpeed'],
+    ['22484632', 'what does bajs mean', 'Bajs', 'forsen'],
+    ['51496027', 'what does reformed mean', 'Reformed', 'Tyler1'],
+    ['23936415', 'what are jermamites', 'Jermamites', 'Jerma985'],
+  ];
+  for (const [channelId, question, term, community] of asked) assert.deepEqual({ term: communitySlang(channelId, question)?.entry.term, community: communitySlang(channelId, question)?.community }, { term, community }, question);
+  // In xQc's chat, Kai Cenat's phrase still answers, credited to Kai Cenat.
+  assert.equal(communitySlang('71092938', 'whats a mafiathon')?.community, 'Kai Cenat');
+  const phrases = communities.flatMap(community => community.entries.flatMap(entry => [entry.term, ...entry.aliases].map(phrase => phrase.toLowerCase())));
+  assert.equal(new Set(phrases).size, phrases.length);
+  assert.equal(new Set(communities.map(community => community.channelId)).size, communities.length);
 });
 
 test('a viewer listener reads live followed channels as that viewer and reports only their own questions, once', async t => {

@@ -278,6 +278,12 @@ StreamLore uses the **current channel**, rather than a global dictionary. The bu
 | --- | --- | --- |
 | xQc (`71092938`) | Juicer / Juicers | A fan or member of xQc’s community. |
 | Caedrel (`92038375`) | Sally | Caedrel’s nickname following his reaction to Fnatic’s lost lead against G2 in the 2024 LEC Summer final. |
+| Jynxzi (`411377640`) | Junko | A nickname for Jynxzi himself. |
+| Kai Cenat (`641972806`) | Mafia / Kai Mafia, Mafiathon | His fanbase, and his marathon subathons named after it. |
+| IShowSpeed (`220476955`) | Sewey | Speed’s take on Cristiano Ronaldo’s “Siuuu” celebration. |
+| forsen (`22484632`) | Bajs | Swedish for poop; what forsen’s viewers call themselves. |
+| Tyler1 (`51496027`) | Reformed | His self-branding as League’s “most reformed player” after his ban. |
+| Jerma985 (`23936415`) | Jermamites | The name for Jerma985’s fans. |
 
 Each entry carries source links and is labeled **starter reference**, not channel endorsement or moderator approval. Moderator-approved definitions take priority. Creators can hide starter references in the configuration view, or add reviewed phrases for their own community. New AI lore still requires moderator review. Add sourced entries to `server/community-lore.ts`; do not add unverified first-use clips or scrape private messages.
 
@@ -494,7 +500,7 @@ Generated directories, credentials, local evidence, and database files are ignor
 - **Prototype hosting:** Node uses SQLite files and a bounded in-process channel registry; Workers use per-channel durable SQLite. Production load and recovery need further validation.
 - **Ballot identity:** standalone cookie votes are bypassable; native votes use verified Twitch opaque IDs. Chat and panel voting currently use separate identity namespaces.
 - **External availability:** API keys, token permissions, provider limits, and hosting affect connected features. A passing local test does not verify those services.
-- **Private chat delivery:** Channel Whispers require each broadcaster’s authorization. Opt-in viewers are answered by streamerlore26, and only in live channels they follow. Whispers cannot be sent to the sending account itself and may be silently dropped by Twitch. The starter dataset currently covers two phrases across two communities.
+- **Private chat delivery:** Channel Whispers require each broadcaster’s authorization. Opt-in viewers are answered by streamerlore26, and only in live channels they follow. Whispers cannot be sent to the sending account itself and may be silently dropped by Twitch. The starter dataset currently covers nine phrases across eight communities.
 - **Viewer opt-in runs only on Workers:** the Node/Docker backend does not include `/everywhere`. Delivery to a real viewer has not been verified yet. Locally, the Worker routes and a Workers-runtime connection to Twitch EventSub have been checked.
 - **Review assets and policies:** the operator still supplies actual support/legal URLs and completes Twitch's required review materials and mobile-device testing.
 

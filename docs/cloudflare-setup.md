@@ -61,7 +61,7 @@ Each opted-in viewer streams the full chat of their live followed channels into 
 
 ## Dataset and privacy
 
-xQc's Juicer/Juicers and Caedrel's Sally are sourced starter references, separate from channel-approved lore. Their presence does not install StreamLore on those streamers' channels or authorize their accounts. Creators can hide starter references. Add and approve a test definition on your own channel when testing there.
+The phrases in `server/community-lore.ts` (xQc's Juicer, Caedrel's Sally, Jynxzi's Junko, Kai Cenat's Mafia and Mafiathon, IShowSpeed's Sewey, forsen's Bajs, Tyler1's Reformed, and Jerma985's Jermamites) are sourced starter references, separate from channel-approved lore. Their presence does not install StreamLore on those streamers' channels or authorize their accounts. Creators can hide starter references. Add and approve a test definition on your own channel when testing there.
 
 Panel questions are answered directly and are not added to shared channel state. Chat questions are public on Twitch; the response is a private Whisper. No private question falls back to a public bot answer. Twitch may silently drop Whispers and imposes a 40-recipient daily limit. [Whisper limitations](https://dev.twitch.tv/docs/chat/whispers/)
 
