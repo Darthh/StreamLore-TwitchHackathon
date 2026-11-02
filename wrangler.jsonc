@@ -12,6 +12,8 @@
     "run_worker_first": [
       "/",
       "/install",
+      "/everywhere",
+      "/everywhere/*",
       "/api/*",
       "/auth/*",
       "/twitch/*",
@@ -24,6 +26,10 @@
       {
         "name": "CHANNELS",
         "class_name": "StreamLoreChannel"
+      },
+      {
+        "name": "EVERYWHERE",
+        "class_name": "StreamLoreEverywhere"
       }
     ]
   },
@@ -33,11 +39,19 @@
       "new_sqlite_classes": [
         "StreamLoreChannel"
       ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "StreamLoreEverywhere"
+      ]
     }
   ],
   "vars": {
     "STREAMLORE_PUBLIC_URL": "https://streamlore.patrickvaldivia123.workers.dev",
-    "TWITCH_EXTENSION_CLIENT_ID": "m7tirdtzbocxkfacsis37lvc81i4uc"
+    "TWITCH_EXTENSION_CLIENT_ID": "m7tirdtzbocxkfacsis37lvc81i4uc",
+    "STREAMLORE_BOT_LOGIN": "streamlore26",
+    "STREAMLORE_MAX_VIEWERS": "40"
   },
   "observability": {
     "enabled": true,

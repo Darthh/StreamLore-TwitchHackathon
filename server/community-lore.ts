@@ -1,4 +1,5 @@
 import type { Lore } from '../shared/types.ts';
+import { answerLoreQuestion } from '../shared/lore.ts';
 
 // Editorial starter references, never represented as approval by these streamers.
 export const communities = [
@@ -31,4 +32,13 @@ export const communities = [
 export function starterLore(channelId: string): Lore[] {
   const community = communities.find(item => item.channelId === channelId);
   return community?.entries.map(entry => ({ ...entry, aliases: [...entry.aliases], references: entry.references.map(reference => ({ ...reference })), category: entry.category, status: 'approved', source: 'starter', clipUrl: '', votes: 0, createdAt: '2026-11-02T00:00:00.000Z' })) || [];
+}
+
+// The channel being watched answers first; otherwise another community's phrase, named as theirs.
+export function communitySlang(channelId: string, question: string): { entry: Lore; community: string } | undefined {
+  const ordered = [...communities].sort((a, b) => Number(b.channelId === channelId) - Number(a.channelId === channelId));
+  for (const community of ordered) {
+    const entry = answerLoreQuestion(starterLore(community.channelId), question);
+    if (entry) return { entry, community: community.displayName };
+  }
 }

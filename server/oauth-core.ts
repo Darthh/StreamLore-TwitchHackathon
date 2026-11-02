@@ -13,10 +13,23 @@ export type OAuthOptions = {
   makeState?: (channelId: string, nonce: string) => string;
   states?: Map<string, { channelId: string; expiresAt: number; generation: number }>;
   generations?: Map<string, number>;
+  // Replaces the broadcaster chat scopes (and the requested Whisper scope) with exactly these.
+  scopes?: string[];
+  // Accepts whichever Twitch user authorizes; begin() is then called without a channel ID.
+  anyAccount?: boolean;
+  table?: string;
+  maxAccounts?: number;
+  page?: { connected: string; connectedBody: string; failed: string; failedBody: string; returnUrl: string; returnLabel: string };
 };
 type AccountRow = { channel_id: string; login: string; display_name: string; profile_image_url: string; credentials: Uint8Array };
 const scopes = ['user:read:chat', 'user:write:chat'];
 const channelPattern = /^\d{1,25}$/;
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => `&#${character.charCodeAt(0)};`);
+// Twitch answered and refused (as opposed to being unreachable); a 400/401 on refresh means the grant was revoked.
+export class TwitchRejectedError extends Error {
+  status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
+}
 
 export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlDatabase) {
   const key = Buffer.from(options.encryptionKey, 'base64');
@@ -25,7 +38,13 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   const redirect = new URL(options.redirectUri);
   if (redirect.protocol !== 'https:' && !(redirect.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(redirect.hostname))) throw new Error('Twitch OAuth redirect URI must use HTTPS (HTTP is allowed only on localhost).');
   if (redirect.username || redirect.password || redirect.hash || redirect.search) throw new Error('Twitch OAuth redirect URI must not contain credentials, query parameters, or a fragment.');
-  db.exec('PRAGMA busy_timeout = 5000; CREATE TABLE IF NOT EXISTS twitch_oauth_accounts (channel_id TEXT PRIMARY KEY, login TEXT NOT NULL, display_name TEXT NOT NULL, profile_image_url TEXT NOT NULL, credentials BLOB NOT NULL)');
+  const table = options.table || 'twitch_oauth_accounts';
+  if (!/^[a-z_]{1,40}$/.test(table)) throw new Error('Twitch account table names may contain only lowercase letters and underscores.');
+  const required = [...(options.scopes || scopes), ...(options.extraScopes || [])];
+  const requested = [...new Set(options.scopes ? required : [...scopes, 'user:manage:whispers', ...(options.extraScopes || [])])];
+  const maxAccounts = options.maxAccounts ?? 1000;
+  const page = options.page || { connected: 'Your channel is connected.', connectedBody: 'Chat is authorized. Return to your StreamLore extension configuration to check its connection and start welcoming viewers.', failed: 'We could not connect your channel.', failedBody: 'This connection request expired, was already used, was declined, or did not authorize the correct broadcaster with both chat permissions. Start a new connection from your StreamLore extension configuration.', returnUrl: 'https://dashboard.twitch.tv/extensions', returnLabel: 'Return to Twitch extensions' };
+  db.exec(`PRAGMA busy_timeout = 5000; CREATE TABLE IF NOT EXISTS ${table} (channel_id TEXT PRIMARY KEY, login TEXT NOT NULL, display_name TEXT NOT NULL, profile_image_url TEXT NOT NULL, credentials BLOB NOT NULL)`);
   const states = options.states || new Map<string, { channelId: string; expiresAt: number; generation: number }>();
   const generations = options.generations || new Map<string, number>();
   const refreshing = new Map<string, Promise<string>>();
@@ -36,7 +55,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   function validChannel(channelId: string) { if (!channelPattern.test(channelId)) throw new Error('A valid Twitch channel ID is required.'); }
   function row(channelId: string): AccountRow | undefined {
     assertOpen(); validChannel(channelId);
-    return db.prepare('SELECT * FROM twitch_oauth_accounts WHERE channel_id = ?').get(channelId) as AccountRow | undefined;
+    return db.prepare(`SELECT * FROM ${table} WHERE channel_id = ?`).get(channelId) as AccountRow | undefined;
   }
   function profile(value: AccountRow): TwitchAccount {
     return { channelId: value.channel_id, login: value.login, displayName: value.display_name, profileImageUrl: value.profile_image_url };
@@ -61,7 +80,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
     let response: Response;
     try { response = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) }); }
     catch { throw new Error('Twitch could not be reached. Try connecting again.'); }
-    if (!response.ok) throw new Error(`Twitch authorization request failed (${response.status}). Reconnect your channel to try again.`);
+    if (!response.ok) throw new TwitchRejectedError(response.status, `Twitch authorization request failed (${response.status}). Reconnect your channel to try again.`);
     try {
       const data: unknown = await response.json();
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error();
@@ -78,10 +97,12 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
     return { accessToken: result.access_token, refreshToken: result.refresh_token, expiresAt: Date.now() + result.expires_in * 1000 };
   }
 
-  async function validateToken(channelId: string, accessToken: string) {
+  // An empty channel ID (anyAccount sign-ups) accepts the authorizing user; the returned ID is who that is.
+  async function validateToken(channelId: string, accessToken: string): Promise<string> {
     const token = await providerRequest('https://id.twitch.tv/oauth2/validate', { headers: { Authorization: `OAuth ${accessToken}` } });
-    if (token.client_id !== options.clientId || token.user_id !== channelId) throw new Error('The Twitch account you authorized does not match this channel. Sign in as its broadcaster and try again.');
-    if (!Array.isArray(token.scopes) || ![...scopes, ...(options.extraScopes || [])].every(scope => token.scopes.includes(scope))) throw new Error('Both Twitch chat permissions are required. Reconnect and allow reading and sending chat messages.');
+    if (token.client_id !== options.clientId || typeof token.user_id !== 'string' || !channelPattern.test(token.user_id) || (channelId && token.user_id !== channelId)) throw new Error('The Twitch account you authorized does not match this channel. Sign in as its broadcaster and try again.');
+    if (!Array.isArray(token.scopes) || !required.every(scope => token.scopes.includes(scope))) throw new Error('Both Twitch chat permissions are required. Reconnect and allow reading and sending chat messages.');
+    return token.user_id;
   }
 
   async function revoke(accessToken: string) {
@@ -96,25 +117,27 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   function account(channelId: string): TwitchAccount | null { const value = row(channelId); return value ? profile(value) : null; }
   function listAccounts(): TwitchAccount[] {
     assertOpen();
-    return (db.prepare('SELECT * FROM twitch_oauth_accounts ORDER BY channel_id').all() as AccountRow[]).map(profile);
+    return (db.prepare(`SELECT * FROM ${table} ORDER BY channel_id`).all() as AccountRow[]).map(profile);
   }
 
-  function begin(channelId: string): string {
-    assertOpen(); validChannel(channelId);
-    for (const [state, pending] of states) if (pending.expiresAt <= Date.now() || pending.channelId === channelId) states.delete(state);
+  function begin(channelId = ''): string {
+    assertOpen();
+    if (channelId || !options.anyAccount) validChannel(channelId);
+    // Sign-ups by unknown users share no channel ID, so they must not cancel one another.
+    for (const [state, pending] of states) if (pending.expiresAt <= Date.now() || (channelId && pending.channelId === channelId)) states.delete(state);
     if (states.size >= 2000) throw new Error('Too many pending Twitch connections. Please try again in five minutes.');
-    const generation = (generations.get(channelId) || 0) + 1;
-    generations.set(channelId, generation);
+    const generation = channelId ? (generations.get(channelId) || 0) + 1 : 0;
+    if (channelId) generations.set(channelId, generation);
     const nonce = randomBytes(32).toString('base64url');
     const state = options.makeState?.(channelId, nonce) || nonce;
     states.set(state, { channelId, expiresAt: Date.now() + 5 * 60_000, generation });
     const authorize = new URL('https://id.twitch.tv/oauth2/authorize');
-    authorize.search = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', scope: [...new Set([...scopes, 'user:manage:whispers', ...(options.extraScopes || [])])].join(' '), force_verify: 'true', state }).toString();
+    authorize.search = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', scope: requested.join(' '), force_verify: 'true', state }).toString();
     return authorize.toString();
   }
 
   function finishPage(response: import('express').Response, status: number, success: boolean) {
-    response.status(status).set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" }).type('html').send(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>StreamLore · Twitch connection</title><style>body{background:#f7f8fa;color:#20212b;font:16px/1.6 system-ui;margin:0;display:grid;min-height:100vh;place-items:center}main{max-width:460px;padding:36px;border:1px solid #e7e4ef;border-radius:22px;background:white;margin:20px}h1{font-size:26px;line-height:1.3}a{color:#7042d7}small{color:#687080}</style><main><small>STREAMLORE</small><h1>${success ? 'Your channel is connected.' : 'We could not connect your channel.'}</h1><p>${success ? 'Chat is authorized. Return to your StreamLore extension configuration to check its connection and start welcoming viewers.' : 'This connection request expired, was already used, was declined, or did not authorize the correct broadcaster with both chat permissions. Start a new connection from your StreamLore extension configuration.'}</p><a href="https://dashboard.twitch.tv/extensions" rel="noreferrer">Return to Twitch extensions</a><p><small>You can close this tab. Your access tokens stay on the StreamLore server.</small></p></main></html>`);
+    response.status(status).set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" }).type('html').send(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>StreamLore · Twitch connection</title><style>body{background:#f7f8fa;color:#20212b;font:16px/1.6 system-ui;margin:0;display:grid;min-height:100vh;place-items:center}main{max-width:460px;padding:36px;border:1px solid #e7e4ef;border-radius:22px;background:white;margin:20px}h1{font-size:26px;line-height:1.3}a{color:#7042d7}small{color:#687080}</style><main><small>STREAMLORE</small><h1>${escapeHtml(success ? page.connected : page.failed)}</h1><p>${escapeHtml(success ? page.connectedBody : page.failedBody)}</p><a href="${escapeHtml(page.returnUrl)}" rel="noreferrer">${escapeHtml(page.returnLabel)}</a><p><small>You can close this tab. Your access tokens stay on the StreamLore server.</small></p></main></html>`);
   }
 
   router.get('/callback', async (request, response) => {
@@ -122,20 +145,20 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
     const state = typeof request.query.state === 'string' ? request.query.state : '';
     const pending = states.get(state);
     if (pending) states.delete(state);
-    if (!pending || pending.expiresAt <= Date.now() || generations.get(pending.channelId) !== pending.generation || request.query.error || typeof request.query.code !== 'string' || !request.query.code || request.query.code.length > 4096) return finishPage(response, 400, false);
+    if (!pending || pending.expiresAt <= Date.now() || (pending.channelId && generations.get(pending.channelId) !== pending.generation) || request.query.error || typeof request.query.code !== 'string' || !request.query.code || request.query.code.length > 4096) return finishPage(response, 400, false);
     let credentials: Credentials | undefined;
     let stored = false;
     try {
       credentials = await tokenRequest({ grant_type: 'authorization_code', code: request.query.code, redirect_uri: options.redirectUri });
-      await validateToken(pending.channelId, credentials.accessToken);
+      const userId = await validateToken(pending.channelId, credentials.accessToken);
       const users = await providerRequest('https://api.twitch.tv/helix/users', { headers: { Authorization: `Bearer ${credentials.accessToken}`, 'Client-Id': options.clientId } });
       const user = users.data?.[0];
-      if (!user || user.id !== pending.channelId || typeof user.login !== 'string' || !/^[a-zA-Z0-9_]{1,25}$/.test(user.login) || typeof user.display_name !== 'string') throw new Error('Twitch profile did not match the authorized broadcaster.');
+      if (!user || user.id !== userId || typeof user.login !== 'string' || !/^[a-zA-Z0-9_]{1,25}$/.test(user.login) || typeof user.display_name !== 'string') throw new Error('Twitch profile did not match the authorized broadcaster.');
       assertOpen();
-      if (generations.get(pending.channelId) !== pending.generation) throw new Error('Connection was superseded or disconnected.');
-      if (!account(pending.channelId) && ((db.prepare('SELECT COUNT(*) AS count FROM twitch_oauth_accounts').get() as { count: number }).count) >= 1000) throw new Error('The connected-channel limit has been reached.');
-      const connected: TwitchAccount = { channelId: pending.channelId, login: user.login, displayName: user.display_name.slice(0, 100), profileImageUrl: typeof user.profile_image_url === 'string' && user.profile_image_url.startsWith('https://') ? user.profile_image_url.slice(0, 1000) : '' };
-      db.prepare('INSERT INTO twitch_oauth_accounts (channel_id, login, display_name, profile_image_url, credentials) VALUES (?, ?, ?, ?, ?) ON CONFLICT(channel_id) DO UPDATE SET login=excluded.login, display_name=excluded.display_name, profile_image_url=excluded.profile_image_url, credentials=excluded.credentials').run(connected.channelId, connected.login, connected.displayName, connected.profileImageUrl, encrypt(connected.channelId, credentials));
+      if (pending.channelId && generations.get(pending.channelId) !== pending.generation) throw new Error('Connection was superseded or disconnected.');
+      if (!account(userId) && ((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count) >= maxAccounts) throw new Error('The connected-channel limit has been reached.');
+      const connected: TwitchAccount = { channelId: userId, login: user.login, displayName: user.display_name.slice(0, 100), profileImageUrl: typeof user.profile_image_url === 'string' && user.profile_image_url.startsWith('https://') ? user.profile_image_url.slice(0, 1000) : '' };
+      db.prepare(`INSERT INTO ${table} (channel_id, login, display_name, profile_image_url, credentials) VALUES (?, ?, ?, ?, ?) ON CONFLICT(channel_id) DO UPDATE SET login=excluded.login, display_name=excluded.display_name, profile_image_url=excluded.profile_image_url, credentials=excluded.credentials`).run(connected.channelId, connected.login, connected.displayName, connected.profileImageUrl, encrypt(connected.channelId, credentials));
       stored = true;
       await options.onConnect(connected);
       return finishPage(response, 200, true);
@@ -157,7 +180,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
       try {
         await validateToken(channelId, next.accessToken);
         assertOpen();
-        const result = db.prepare('UPDATE twitch_oauth_accounts SET credentials = ? WHERE channel_id = ? AND credentials = ?').run(encrypt(channelId, next), channelId, current.credentials);
+        const result = db.prepare(`UPDATE ${table} SET credentials = ? WHERE channel_id = ? AND credentials = ?`).run(encrypt(channelId, next), channelId, current.credentials);
         if (result.changes !== 1) throw new Error('Twitch connection changed during refresh. Reconnect if needed.');
       } catch (error) { await revoke(next.accessToken); throw error; }
       return next.accessToken;
@@ -182,7 +205,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
     const current = row(channelId);
     generations.set(channelId, (generations.get(channelId) || 0) + 1);
     for (const [state, pending] of states) if (pending.channelId === channelId) states.delete(state);
-    db.prepare('DELETE FROM twitch_oauth_accounts WHERE channel_id = ?').run(channelId);
+    db.prepare(`DELETE FROM ${table} WHERE channel_id = ?`).run(channelId);
     let token: string | undefined;
     if (current) { try { token = decrypt(channelId, current.credentials).accessToken; } catch { /* Corrupt credentials must still be removable. */ } }
     try { await options.onDisconnect(channelId); } finally { if (token) await revoke(token); }

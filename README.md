@@ -261,7 +261,7 @@ The moderator password must contain at least 12 characters. Use a Twitch user to
 | `!catchup` | Current recap and companion-page link. |
 | `!lore` | Available example terms and the library link. |
 | `!lore refrigerator` | Private Whisper with the known definition, when the connected account has Whisper permission. |
-| `What is a juicer?` / `What is Sally?` | A known phrase in the current community triggers a private Whisper; it never falls back to a public answer. |
+| `What is a juicer?` / `whats a juicer` / `What is Sally?` | A known phrase in the current community triggers a private Whisper; it never falls back to a public answer. Viewers who [opted in](#streamlore-in-every-chat-viewer-opt-in) get the same Whisper from streamlore26 in any live channel they follow. |
 | `!lorevote summit tax` | Vote for a moderator-reviewed nomination. |
 
 The Node bot uses EventSub WebSockets with reconnects. The Worker receives signed EventSub webhooks and persists replay protection and Whisper cooldowns. Both paths validate authorization, deduplicate events, and throttle outgoing replies. Native OAuth accounts support encrypted refresh-token rotation and a refresh/retry after an expired-token response. The standalone `TWITCH_ACCESS_TOKEN` setup requires manual replacement when authorization expires.
@@ -296,6 +296,17 @@ There are two private answer paths:
 Reconnect the broadcaster account to grant **`user:manage:whispers`**. Existing chat-only grants continue reading chat but cannot send Whispers. Twitch requires a phone-verified sender, limits Whispers to **40 unique recipients per day**, and can reject or silently drop messages even after a successful API response. StreamLore bounds messages to 500 characters and throttles requests; the panel remains the dependable answer surface. [Twitch Whisper requirements](https://dev.twitch.tv/docs/chat/whispers/)
 
 The Extension must be installed on the channel and its broadcaster must connect the account before chat monitoring and Whispers work. Bundling xQc/Caedrel definitions does not install StreamLore on their channels or authorize their accounts. Local dataset previews send no Twitch messages.
+
+### StreamLore in every chat (viewer opt-in)
+
+Viewers can also turn StreamLore on for themselves at **[`/everywhere`](https://streamlore.patrickvaldivia123.workers.dev/everywhere)**, with no streamer installation. After that, a question such as `whats a juicer` typed in xQc's chat gets a private Whisper from **streamlore26**.
+
+1. The viewer signs in with Twitch and grants only `user:read:chat` and `user:read:follows`. StreamLore never posts, follows, or whispers as them.
+2. Every three minutes the Worker lists their followed channels that are live. It reads those chats *as the viewer* over one EventSub WebSocket. Webhooks can't do this, because they need each broadcaster's consent. With nothing live, no connection stays open.
+3. Only the viewer's own messages are checked, using the same question detection as above: `whats a juicer`, `@xqc what's a juicer?`, `who is sally`, `!lore juicer`. The channel being watched answers first. Otherwise another community's phrase answers, and the Whisper names whose phrase it is.
+4. **streamlore26** sends the Whisper. If that channel has StreamLore installed with chat connected, its broadcaster account already whispers askers, so the opt-in path stays silent to avoid a second Whisper.
+
+The streamlore26 owner connects the account once at `/everywhere/bot`. Twitch completes that sign-in only for streamlore26 itself, which needs a verified phone number. A viewer turns StreamLore off by disconnecting it in Twitch **Settings → Connections**. Twitch then revokes the EventSub subscriptions, and StreamLore deletes the stored grant. Questions in channels the viewer doesn't follow are not seen. Capacity defaults to 40 viewers (`STREAMLORE_MAX_VIEWERS`), matching Twitch's 40 unique Whisper recipients a day.
 
 ## Captions, clips, and optional AI
 
@@ -483,7 +494,8 @@ Generated directories, credentials, local evidence, and database files are ignor
 - **Prototype hosting:** Node uses SQLite files and a bounded in-process channel registry; Workers use per-channel durable SQLite. Production load and recovery need further validation.
 - **Ballot identity:** standalone cookie votes are bypassable; native votes use verified Twitch opaque IDs. Chat and panel voting currently use separate identity namespaces.
 - **External availability:** API keys, token permissions, provider limits, and hosting affect connected features. A passing local test does not verify those services.
-- **Private chat delivery:** Whispers require each broadcaster’s authorization, cannot be sent to the sending account itself, and may be silently dropped by Twitch. The starter dataset currently covers two phrases across two communities.
+- **Private chat delivery:** Channel Whispers require each broadcaster’s authorization. Opt-in viewers are answered by streamlore26, and only in live channels they follow. Whispers cannot be sent to the sending account itself and may be silently dropped by Twitch. The starter dataset currently covers two phrases across two communities.
+- **Viewer opt-in runs only on Workers:** the Node/Docker backend does not include `/everywhere`. Delivery to a real viewer has not been verified yet. Locally, the Worker routes and a Workers-runtime connection to Twitch EventSub have been checked.
 - **Review assets and policies:** the operator still supplies actual support/legal URLs and completes Twitch's required review materials and mobile-device testing.
 
 ## Codex and the hackathon

@@ -12,13 +12,16 @@ import { parseCommand, chatReply } from '../server/twitch-commands.ts';
 import { verifyEventSub, oauthRoutingState, oauthStateChannel } from '../server/eventsub.ts';
 import type { ContentAuthor } from '../shared/types.ts';
 import { durableDatabase, persistentMap } from './database.ts';
+import type { StreamLoreEverywhere } from './everywhere.ts';
 
-type Env = {
-  CHANNELS: DurableObjectNamespace<StreamLoreChannel>; ASSETS: Fetcher;
+export { StreamLoreEverywhere } from './everywhere.ts';
+export type Env = {
+  CHANNELS: DurableObjectNamespace<StreamLoreChannel>; EVERYWHERE: DurableObjectNamespace<StreamLoreEverywhere>; ASSETS: Fetcher;
   STREAMLORE_PUBLIC_URL: string; TWITCH_EXTENSION_CLIENT_ID: string;
   TWITCH_EXTENSION_SECRET?: string; TWITCH_CLIENT_ID?: string; TWITCH_CLIENT_SECRET?: string;
   STREAMLORE_TOKEN_ENCRYPTION_KEY?: string; TWITCH_EVENTSUB_SECRET?: string;
   OPENAI_API_KEY?: string; OPENAI_MODEL?: string;
+  STREAMLORE_BOT_LOGIN?: string; STREAMLORE_MAX_VIEWERS?: string;
 };
 const numericId = (value: string) => /^[1-9]\d{0,24}$/.test(value);
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -68,7 +71,10 @@ export default {
       try { return cors(await forward(request, identity.channelId, env), request); }
       catch (error) { console.error('Channel service failed:', error instanceof Error ? error.message : 'unavailable'); return cors(json({ error: 'StreamLore could not load this channel. Try again shortly.' }, 503), request); }
     }
+    const everywhere = () => env.EVERYWHERE.get(env.EVERYWHERE.idFromName('everywhere')).fetch(request);
+    if (request.method === 'GET' && ['/api/everywhere/status', '/everywhere/on', '/everywhere/bot'].includes(path)) return everywhere();
     if (path === '/auth/twitch/callback') {
+      if (/^(?:viewer|bot)\./.test(url.searchParams.get('state') || '')) return everywhere();
       const channelId = oauthStateChannel(url.searchParams.get('state') || '', env.STREAMLORE_TOKEN_ENCRYPTION_KEY || '');
       if (!channelId || !oauthReady(env)) return json({ error: 'Start a new connection from Twitch Extension configuration.' }, 400);
       return forward(request, channelId, env);
@@ -89,6 +95,7 @@ export default {
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Method not allowed.' }, 405);
     if (path === '/') return Response.redirect(`${env.STREAMLORE_PUBLIC_URL}/install`, 302);
     if (path === '/install') url.pathname = '/install.html';
+    else if (path === '/everywhere') url.pathname = '/everywhere.html';
     else if (/^\/channels\/[1-9]\d{0,24}(?:\/overlay)?\/?$/.test(path)) url.pathname = '/index.html';
     return env.ASSETS.fetch(new Request(url, request));
   },
@@ -109,6 +116,7 @@ export class StreamLoreChannel extends DurableObject<Env> {
     const channelId = request.headers.get('X-StreamLore-Channel') || '';
     if (!numericId(channelId) || (this.channelId && this.channelId !== channelId)) return json({ error: 'Invalid channel.' }, 403);
     const url = new URL(request.url);
+    if (url.pathname === '/internal/answer' && request.method === 'POST') return this.internalAnswer(request, channelId);
     if (url.pathname.startsWith('/channels/') && !this.ctx.storage.kv.get('initialized')) return json({ error: 'This channel has not opened StreamLore yet.' }, 404);
     this.ready ||= this.initialize(channelId);
     await this.ready;
@@ -210,6 +218,16 @@ export class StreamLoreChannel extends DurableObject<Env> {
     this.server = createServer(app);
     await new Promise<void>(resolve => this.server!.listen(0, () => { const address = this.server!.address(); if (address && typeof address !== 'string') this.port = address.port; resolve(); }));
     this.ctx.storage.kv.put('initialized', true);
+  }
+
+  // Only the Everywhere object calls this (the Worker never forwards /internal paths). Channels that never opened
+  // StreamLore answer without creating any storage.
+  private async internalAnswer(request: Request, channelId: string): Promise<Response> {
+    if (!this.ctx.storage.kv.get('initialized')) return json({ installed: false });
+    this.ready ||= this.initialize(channelId);
+    await this.ready;
+    const { question } = await request.json() as { question?: unknown };
+    return json({ installed: true, chatConnected: this.ctx.storage.kv.get<boolean>('chat-enabled') === true, entry: typeof question === 'string' ? this.runtime!.loreAnswer(question.slice(0, 300)) || null : null, displayName: this.runtime!.state().channel.displayName });
   }
 
   private chatStatus(connected: boolean, message: string) {
