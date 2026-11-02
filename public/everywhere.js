@@ -28,8 +28,10 @@ async function loadStatus() {
     byId('badge').textContent = open ? 'Open' : status.full ? 'Full' : 'Not ready';
     byId('badge').classList.toggle('ready', open);
     byId('availability').classList.toggle('ready', open);
-    byId('availability-title').textContent = open ? 'Ready to turn on' : status.full ? 'All spots are taken' : 'Not accepting viewers yet';
-    byId('availability-description').textContent = open ? `${status.viewers} of ${status.capacity} spots in use. Sign in with Twitch to get answers in every chat.` : status.full ? notices.full : 'The Whisper account still needs to be connected by its owner.';
+    const needsSender = status.configured === true && status.bot.connected !== true;
+    byId('availability-title').textContent = open ? 'Ready to turn on' : status.full ? 'All spots are taken' : needsSender ? `Connect ${status.bot.login} first` : 'Not accepting viewers yet';
+    byId('availability-description').textContent = open ? `${status.viewers} of ${status.capacity} spots in use. Sign in with Twitch to get answers in every chat.` : status.full ? notices.full : needsSender ? `Whispers come from ${status.bot.login}, so it has to be connected before anyone can turn StreamLore on. Sign in to Twitch as ${status.bot.login} (a private window keeps your own account signed in), connect it, then come back here.` : 'StreamLore’s Twitch connection isn’t set up yet.';
+    byId('connect-bot').hidden = !needsSender;
     byId('bot-label').textContent = status.bot.connected ? 'Connected' : 'Not connected';
     byId('bot-dot').classList.toggle('ready', status.bot.connected === true);
     setEnabled(open);
