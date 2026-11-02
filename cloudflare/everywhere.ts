@@ -100,7 +100,10 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
         if (current && current !== id) await this.bot.disconnect(current);
         // Anyone may open this, but Twitch only completes it for the account that owns this user ID.
         res.redirect(303, this.bot.begin(id));
-      } catch { res.redirect(303, '/everywhere?notice=unavailable'); }
+      } catch (error) {
+        console.error('Whisper account connection failed:', error instanceof Error ? error.message : 'unavailable');
+        res.redirect(303, '/everywhere?notice=unavailable');
+      }
     });
     app.use((_req, res) => res.status(404).json({ error: 'Not found.' }));
     this.server = createServer(app);
