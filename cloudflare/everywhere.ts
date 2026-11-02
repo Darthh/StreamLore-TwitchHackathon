@@ -12,6 +12,9 @@ import type { Env } from './index.ts';
 
 type OAuth = ReturnType<typeof createTwitchOAuthWithDatabase>;
 type ChannelAnswer = { installed?: boolean; chatConnected?: boolean; entry?: Lore | null; displayName?: string };
+// Anonymous counts for the public status: where an opted-in question stopped, never who asked it or what it said.
+type Activity = { questions: number; unknown: number; answeredByChannel: number; limited: number; sent: number; failed: number; lastFailure: number | null };
+const emptyActivity = (): Activity => ({ questions: 0, unknown: 0, answeredByChannel: 0, limited: 0, sent: 0, failed: 0, lastFailure: null });
 const numericId = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d{0,24}$/.test(value);
 // Viewers let StreamLore read chat as them and see which followed channels are live; it never posts or whispers as them.
 const viewerScopes = ['user:read:chat', 'user:read:follows'];
@@ -37,6 +40,7 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
   private listeners = new Map<string, ReturnType<typeof createViewerListener>>();
   private refreshed = new Map<string, number>();
   private validated = new Map<string, number>();
+  private activity: Activity = emptyActivity();
 
   async fetch(request: Request): Promise<Response> {
     this.ready ||= this.initialize();
@@ -67,13 +71,21 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
     const env = this.env, db = durableDatabase(this.ctx.storage), app = express(), bot = this.botLogin(), back = `${env.STREAMLORE_PUBLIC_URL}/everywhere`;
     app.disable('x-powered-by');
     this.reserve = createWhisperLimiter({ usage: this.ctx.storage.kv.get<WhisperUsage>('whisper-usage'), saveUsage: usage => { this.ctx.storage.kv.put('whisper-usage', usage); } });
+    this.activity = { ...emptyActivity(), ...this.ctx.storage.kv.get<Activity>('activity') };
     if (env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.STREAMLORE_TOKEN_ENCRYPTION_KEY) {
       // Both sign-ins reuse the OAuth app's registered callback; the state prefix routes them here.
       const shared = { databasePath: ':durable:', clientId: env.TWITCH_CLIENT_ID, clientSecret: env.TWITCH_CLIENT_SECRET, redirectUri: `${env.STREAMLORE_PUBLIC_URL}/auth/twitch/callback`, encryptionKey: env.STREAMLORE_TOKEN_ENCRYPTION_KEY };
       this.viewers = createTwitchOAuthWithDatabase({ ...shared, scopes: viewerScopes, anyAccount: true, table: 'viewer_accounts', maxAccounts: this.capacity(),
         states: persistentMap(this.ctx.storage, 'viewer-states'), makeState: (_id, nonce) => `viewer.${nonce}`,
-        page: { connected: 'StreamLore is on.', connectedBody: `Ask about a phrase in the chat of any channel you follow while it is live, like “whats a juicer?” in xQc’s chat, and ${bot || 'StreamLore'} will whisper you the answer. StreamLore reads chat as you but never posts or whispers as you. Turn it off anytime in Twitch Settings → Connections.`, failed: 'StreamLore could not turn on.', failedBody: 'The sign-in expired or was declined, StreamLore is full, or Twitch did not grant chat reading. Start again from the StreamLore page.', returnUrl: back, returnLabel: 'Back to StreamLore' },
-        onConnect: async account => { this.refreshed.delete(account.channelId); await this.refreshViewer(account.channelId); await this.scheduleAlarm(); },
+        page: { connected: 'StreamLore is on.', connectedBody: `Ask about a phrase in the chat of any channel you follow while it is live, like “whats a juicer?” in xQc’s chat, and ${bot || 'StreamLore'} will whisper you the answer. StreamLore reads chat as you but never posts or whispers as you. Turn it off anytime in Twitch Settings → Connections.`, failed: 'StreamLore could not turn on.', failedBody: `The sign-in expired or was declined, StreamLore is full, Twitch did not grant chat reading, or you signed in as ${bot || 'the Whisper account'}. Log in to Twitch with your own account and start again from the StreamLore page.`, returnUrl: back, returnLabel: 'Back to StreamLore' },
+        onConnect: async account => {
+          // The Whisper account cannot whisper itself; a browser still signed in as it would otherwise enroll it by mistake.
+          if (account.channelId === this.ctx.storage.kv.get<string>('bot-id')) {
+            await this.viewers!.disconnect(account.channelId);
+            throw new Error('The Whisper account cannot turn StreamLore on for itself.');
+          }
+          this.refreshed.delete(account.channelId); await this.refreshViewer(account.channelId); await this.scheduleAlarm();
+        },
         onDisconnect: id => { this.listeners.get(id)?.close(); this.listeners.delete(id); this.refreshed.delete(id); this.validated.delete(id); },
       }, db);
       this.bot = createTwitchOAuthWithDatabase({ ...shared, scopes: ['user:manage:whispers'], table: 'whisper_account', maxAccounts: 1,
@@ -86,7 +98,8 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
     }
     app.get('/api/everywhere/status', (_req, res) => {
       const viewers = this.viewers?.listAccounts().length || 0;
-      res.set('Cache-Control', 'no-store').json({ configured: Boolean(this.viewers && bot), bot: { login: bot, connected: Boolean(this.botAccount()) }, viewers, capacity: this.capacity(), full: viewers >= this.capacity(), listening: [...this.listeners.values()].filter(listener => listener.connected()).length });
+      const listeners = [...this.listeners.values()];
+      res.set('Cache-Control', 'no-store').json({ configured: Boolean(this.viewers && bot), bot: { login: bot, connected: Boolean(this.botAccount()) }, viewers, capacity: this.capacity(), full: viewers >= this.capacity(), listening: listeners.filter(listener => listener.connected()).length, channels: listeners.reduce((total, listener) => total + listener.channels().length, 0), activity: this.activity });
     });
     app.get('/everywhere/on', (_req, res) => {
       if (!this.viewers || !this.botAccount()) return res.redirect(303, '/everywhere?notice=unavailable');
@@ -146,6 +159,8 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
   }
 
   private async refreshAll() {
+    const botId = this.ctx.storage.kv.get<string>('bot-id');
+    if (botId && this.viewers?.account(botId)) await this.viewers.disconnect(botId).catch(() => {});
     const accounts = this.viewers?.listAccounts() || [], ids = new Set(accounts.map(account => account.channelId));
     for (const [id, listener] of this.listeners) if (!ids.has(id)) { listener.close(); this.listeners.delete(id); }
     for (const id of ids) await this.refreshViewer(id);
@@ -187,18 +202,28 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
     } catch { return {}; }
   }
 
+  private count(update: (activity: Activity) => void) {
+    update(this.activity);
+    this.ctx.storage.kv.put('activity', this.activity);
+  }
+
   private async answer(viewerId: string, question: ChatQuestion) {
     const bot = this.botAccount();
     if (!bot || !this.bot || bot.channelId === viewerId) return;
+    this.count(activity => { activity.questions++; });
     const channel = await this.channelAnswer(question);
     // A channel running StreamLore with chat connected already whispers its askers from the broadcaster account.
-    if (channel.chatConnected) return;
+    if (channel.chatConnected) return this.count(activity => { activity.answeredByChannel++; });
     const found = channel.entry ? { entry: channel.entry, community: channel.displayName || question.channelLogin } : communitySlang(question.channelId, question.question);
-    if (!found || !this.reserve(viewerId)) return;
+    if (!found) return this.count(activity => { activity.unknown++; });
+    if (!this.reserve(viewerId)) return this.count(activity => { activity.limited++; });
     try {
       await this.helix(this.bot, bot.channelId, `whispers?${new URLSearchParams({ from_user_id: bot.channelId, to_user_id: viewerId })}`, { method: 'POST', body: JSON.stringify({ message: whisperText(found.entry, found.community) }) });
+      this.count(activity => { activity.sent++; });
     } catch (error) {
-      console.error('StreamLore Whisper failed:', error instanceof TwitchRejectedError ? error.status : 'unavailable');
+      const status = error instanceof TwitchRejectedError ? error.status : 0;
+      this.count(activity => { activity.failed++; activity.lastFailure = status; });
+      console.error('StreamLore Whisper failed:', status || 'unavailable');
     }
   }
 }

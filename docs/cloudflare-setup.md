@@ -52,9 +52,9 @@ The webhook endpoint is `/twitch/eventsub`. Signatures and timestamps are checke
 
 `/everywhere` lets any viewer turn StreamLore on without a streamer installation. One `StreamLoreEverywhere` Durable Object (migration `v2`) stores the viewers' encrypted grants and the Whisper account. It holds one outbound EventSub WebSocket per viewer while any of their followed channels is live. It reuses the existing OAuth application, encryption key, and registered `/auth/twitch/callback`: no new secret or redirect URI is needed.
 
-1. Deploy (`npm run deploy:worker`). `wrangler.jsonc` sets `STREAMLORE_BOT_LOGIN=streamerlore26` and `STREAMLORE_MAX_VIEWERS=40`.
-2. Make sure **streamerlore26** has a verified phone number on Twitch; unverified senders cannot whisper.
-3. Signed in to Twitch as streamerlore26, open `/everywhere/bot` and allow **Whispers** (`user:manage:whispers`). The `/everywhere` page then shows the Whisper account as connected.
+1. Deploy (`npm run deploy:worker`). `wrangler.jsonc` sets `STREAMLORE_BOT_LOGIN=streamlore26` and `STREAMLORE_MAX_VIEWERS=40`.
+2. Make sure **streamlore26** has a verified phone number on Twitch; unverified senders cannot whisper.
+3. Signed in to Twitch as streamlore26, open `/everywhere/bot` and allow **Whispers** (`user:manage:whispers`). The `/everywhere` page then shows the Whisper account as connected.
 4. As a different account, open `/everywhere`, select **Turn on with Twitch**, and allow chat reading and follows. Then type `whats a juicer` in a live channel you follow, such as xQc's.
 
 Each opted-in viewer streams the full chat of their live followed channels into the Worker, and the object stays awake while any is live. Cloudflare bills a Durable Object for the time it is active, and a busy channel means many incoming messages, so watch usage before raising capacity. A one-minute alarm restores listeners after an eviction. Followed channels are re-checked every three minutes and tokens validated hourly.
