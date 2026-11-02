@@ -43,6 +43,9 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
   private activity: Activity = emptyActivity();
 
   async fetch(request: Request): Promise<Response> {
+    // Open WebSockets keep this object running old code through a deploy; restart when a newer Worker calls.
+    const caller = request.headers.get('X-StreamLore-Version'), own = this.env.CF_VERSION_METADATA?.id;
+    if (caller && own && caller !== own) this.ctx.abort('StreamLore was redeployed.');
     this.ready ||= this.initialize();
     await this.ready;
     return handleAsNodeRequest(this.port, request);
@@ -91,7 +94,7 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
       this.bot = createTwitchOAuthWithDatabase({ ...shared, scopes: ['user:manage:whispers'], table: 'whisper_account', maxAccounts: 1,
         states: persistentMap(this.ctx.storage, 'bot-states'), generations: persistentMap(this.ctx.storage, 'bot-generations'), makeState: (_id, nonce) => `bot.${nonce}`,
         page: { connected: `${bot} can send answers.`, connectedBody: 'StreamLore will whisper slang answers from this account. Twitch only delivers Whispers from accounts with a verified phone number.', failed: 'The Whisper account was not connected.', failedBody: `Sign in as ${bot} and allow Whispers, then try again from the StreamLore page.`, returnUrl: back, returnLabel: 'Back to StreamLore' },
-        onConnect: account => { this.ctx.storage.kv.put('bot-id', account.channelId); },
+        onConnect: async account => { this.ctx.storage.kv.put('bot-id', account.channelId); await this.refreshAll(); },
         onDisconnect: () => { this.ctx.storage.kv.delete('bot-id'); },
       }, db);
       app.use('/auth/twitch', (req, res, next) => (String(req.query.state || '').startsWith('bot.') ? this.bot! : this.viewers!).router(req, res, next));
@@ -161,8 +164,9 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
   private async refreshAll() {
     const botId = this.ctx.storage.kv.get<string>('bot-id');
     if (botId && this.viewers?.account(botId)) await this.viewers.disconnect(botId).catch(() => {});
-    const accounts = this.viewers?.listAccounts() || [], ids = new Set(accounts.map(account => account.channelId));
-    for (const [id, listener] of this.listeners) if (!ids.has(id)) { listener.close(); this.listeners.delete(id); }
+    // Without a working Whisper account, reading chat would only cost resources: hold no connections until it is back.
+    const accounts = this.botAccount() ? this.viewers?.listAccounts() || [] : [], ids = new Set(accounts.map(account => account.channelId));
+    for (const [id, listener] of this.listeners) if (!ids.has(id)) { listener.close(); this.listeners.delete(id); this.refreshed.delete(id); }
     for (const id of ids) await this.refreshViewer(id);
     if (ids.size) await this.ctx.storage.setAlarm(Date.now() + 60_000);
   }
@@ -170,7 +174,7 @@ export class StreamLoreEverywhere extends DurableObject<Env> {
   // Followed live channels are re-read every three minutes; Twitch expects tokens to be validated hourly.
   private async refreshViewer(viewerId: string) {
     const now = Date.now();
-    if (!this.viewers || now - (this.refreshed.get(viewerId) || 0) < 170_000) return;
+    if (!this.viewers || !this.botAccount() || now - (this.refreshed.get(viewerId) || 0) < 170_000) return;
     this.refreshed.set(viewerId, now);
     try {
       if (now - (this.validated.get(viewerId) || 0) > 3_600_000) {

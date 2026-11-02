@@ -53,6 +53,9 @@
     "STREAMLORE_BOT_LOGIN": "streamlore26",
     "STREAMLORE_MAX_VIEWERS": "40"
   },
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 0.1

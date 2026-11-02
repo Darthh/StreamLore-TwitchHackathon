@@ -22,6 +22,7 @@ export type Env = {
   STREAMLORE_TOKEN_ENCRYPTION_KEY?: string; TWITCH_EVENTSUB_SECRET?: string;
   OPENAI_API_KEY?: string; OPENAI_MODEL?: string;
   STREAMLORE_BOT_LOGIN?: string; STREAMLORE_MAX_VIEWERS?: string;
+  CF_VERSION_METADATA?: WorkerVersionMetadata;
 };
 const numericId = (value: string) => /^[1-9]\d{0,24}$/.test(value);
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -71,7 +72,14 @@ export default {
       try { return cors(await forward(request, identity.channelId, env), request); }
       catch (error) { console.error('Channel service failed:', error instanceof Error ? error.message : 'unavailable'); return cors(json({ error: 'StreamLore could not load this channel. Try again shortly.' }, 503), request); }
     }
-    const everywhere = () => env.EVERYWHERE.get(env.EVERYWHERE.idFromName('everywhere')).fetch(request);
+    // The hub restarts itself when its code is older than this Worker's (see StreamLoreEverywhere.fetch); one retry
+    // reaches the restarted object. "everywhere-v2" replaced an object that predates that restart.
+    const everywhere = async () => {
+      const headers = new Headers(request.headers);
+      headers.set('X-StreamLore-Version', env.CF_VERSION_METADATA?.id || '');
+      const send = () => env.EVERYWHERE.get(env.EVERYWHERE.idFromName('everywhere-v2')).fetch(new Request(request, { headers }));
+      try { return await send(); } catch { return send(); }
+    };
     if (request.method === 'GET' && ['/api/everywhere/status', '/everywhere/on', '/everywhere/bot'].includes(path)) return everywhere();
     if (path === '/auth/twitch/callback') {
       if (/^(?:viewer|bot)\./.test(url.searchParams.get('state') || '')) return everywhere();
