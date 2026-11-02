@@ -10,6 +10,7 @@ export type OAuthOptions = {
   onConnect: (account: TwitchAccount) => void | Promise<void>;
   onDisconnect: (channelId: string) => void | Promise<void>;
   extraScopes?: string[];
+  scopes?: string[];
   makeState?: (channelId: string, nonce: string) => string;
   states?: Map<string, { channelId: string; expiresAt: number; generation: number }>;
   generations?: Map<string, number>;
@@ -81,7 +82,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   async function validateToken(channelId: string, accessToken: string) {
     const token = await providerRequest('https://id.twitch.tv/oauth2/validate', { headers: { Authorization: `OAuth ${accessToken}` } });
     if (token.client_id !== options.clientId || token.user_id !== channelId) throw new Error('The Twitch account you authorized does not match this channel. Sign in as its broadcaster and try again.');
-    if (!Array.isArray(token.scopes) || ![...scopes, ...(options.extraScopes || [])].every(scope => token.scopes.includes(scope))) throw new Error('Both Twitch chat permissions are required. Reconnect and allow reading and sending chat messages.');
+    if (!Array.isArray(token.scopes) || !(options.scopes ?? [...scopes, ...(options.extraScopes || [])]).every(scope => token.scopes.includes(scope))) throw new Error('Required Twitch permissions are missing. Reconnect and allow the requested access.');
   }
 
   async function revoke(accessToken: string) {
@@ -109,7 +110,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
     const state = options.makeState?.(channelId, nonce) || nonce;
     states.set(state, { channelId, expiresAt: Date.now() + 5 * 60_000, generation });
     const authorize = new URL('https://id.twitch.tv/oauth2/authorize');
-    authorize.search = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', scope: [...new Set([...scopes, 'user:manage:whispers', ...(options.extraScopes || [])])].join(' '), force_verify: 'true', state }).toString();
+    authorize.search = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', scope: [...new Set(options.scopes ?? [...scopes, 'user:manage:whispers', ...(options.extraScopes || [])])].join(' '), force_verify: 'true', state }).toString();
     return authorize.toString();
   }
 

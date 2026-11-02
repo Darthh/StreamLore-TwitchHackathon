@@ -12,6 +12,10 @@ import { parseCommand, chatReply } from '../server/twitch-commands.ts';
 import { verifyEventSub, oauthRoutingState, oauthStateChannel } from '../server/eventsub.ts';
 import type { ContentAuthor } from '../shared/types.ts';
 import { durableDatabase, persistentMap } from './database.ts';
+import { handleViewerAuth, cookieViewer } from '../server/viewer-auth.ts';
+import { personalViewerApi } from '../server/viewer-api.ts';
+import { answerLoreQuestion } from '../shared/lore.ts';
+import { starterLore } from '../server/community-lore.ts';
 
 type Env = {
   CHANNELS: DurableObjectNamespace<StreamLoreChannel>; ASSETS: Fetcher;
@@ -19,6 +23,7 @@ type Env = {
   TWITCH_EXTENSION_SECRET?: string; TWITCH_CLIENT_ID?: string; TWITCH_CLIENT_SECRET?: string;
   STREAMLORE_TOKEN_ENCRYPTION_KEY?: string; TWITCH_EVENTSUB_SECRET?: string;
   OPENAI_API_KEY?: string; OPENAI_MODEL?: string;
+  STREAMLORE_BOT_USER_ID?: string;
 };
 const numericId = (value: string) => /^[1-9]\d{0,24}$/.test(value);
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
@@ -55,6 +60,18 @@ function forward(request: Request, channelId: string, env: Env, body?: string) {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), path = url.pathname;
+    if (path.startsWith('/auth/viewer/')) return (await handleViewerAuth(request, env)) || json({ error: 'Not found.' }, 404);
+    if (path === '/auth/bot/start' && request.method === 'GET') {
+      if (!env.STREAMLORE_BOT_USER_ID || !numericId(env.STREAMLORE_BOT_USER_ID) || !oauthReady(env)) return json({ error: 'The operator must configure the dedicated StreamLore bot account.' }, 503);
+      const operator = cookieViewer(request, env.STREAMLORE_TOKEN_ENCRYPTION_KEY || '');
+      if (!operator || operator.userId !== env.STREAMLORE_BOT_USER_ID) return Response.redirect(`${env.STREAMLORE_PUBLIC_URL}/auth/viewer/start?bot=1`, 302);
+      const bot = env.CHANNELS.get(env.CHANNELS.idFromName(env.STREAMLORE_BOT_USER_ID));
+      return Response.redirect(await bot.startPersonalBotConnection(), 302);
+    }
+    if (['/api/viewer/session', '/api/viewer/ask'].includes(path)) {
+      const configured = Boolean(env.STREAMLORE_BOT_USER_ID && numericId(env.STREAMLORE_BOT_USER_ID));
+      return personalViewerApi(request, env.STREAMLORE_TOKEN_ENCRYPTION_KEY || '', configured, (recipient, channel, question) => env.CHANNELS.get(env.CHANNELS.idFromName(env.STREAMLORE_BOT_USER_ID!)).sendPersonalWhisper(recipient, channel, question));
+    }
     if (path === '/api/health') return json({ ok: true, mode: 'extension', runtime: 'cloudflare-workers' });
     if (path === '/api/install/status') return json(setup(env));
     if (path.startsWith('/api/extension/')) {
@@ -87,8 +104,9 @@ export default {
     if (channel) return request.method === 'GET' ? forward(request, channel[1], env) : json({ error: 'Use the Twitch Extension to make changes.' }, 403);
     if (path.startsWith('/api/')) return json({ error: 'Use the Twitch Extension for channel access.' }, 404);
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Method not allowed.' }, 405);
-    if (path === '/') return Response.redirect(`${env.STREAMLORE_PUBLIC_URL}/install`, 302);
+    if (path === '/') return Response.redirect(`${env.STREAMLORE_PUBLIC_URL}/viewer`, 302);
     if (path === '/install') url.pathname = '/install.html';
+    else if (path === '/viewer') url.pathname = '/viewer.html';
     else if (/^\/channels\/[1-9]\d{0,24}(?:\/overlay)?\/?$/.test(path)) url.pathname = '/index.html';
     return env.ASSETS.fetch(new Request(url, request));
   },
@@ -104,6 +122,51 @@ export class StreamLoreChannel extends DurableObject<Env> {
   private ready?: Promise<void>;
   private resetAfterResponse = false;
   private whisper?: ReturnType<typeof createLoreWhispers>;
+  private appAccess?: { token: string; expiresAt: number };
+  private personalLookupAt = new Map<string, number>();
+
+  async startPersonalBotConnection(): Promise<string> {
+    const id = this.env.STREAMLORE_BOT_USER_ID || '';
+    if (!numericId(id)) throw new Error('Configure the StreamLore sender.');
+    this.ready ||= this.initialize(id); await this.ready;
+    if (!this.oauth) throw new Error('Configure Twitch OAuth.');
+    return this.oauth.begin(id);
+  }
+
+  async lookupPersonalLore(channelId: string, question: string) {
+    if (!numericId(channelId) || !loreQuestion(question)) return null;
+    if (!this.ctx.storage.kv.get('initialized')) return answerLoreQuestion(starterLore(channelId), question) || null;
+    this.ready ||= this.initialize(channelId); await this.ready;
+    return this.runtime!.loreAnswer(question) || null;
+  }
+
+  async sendPersonalWhisper(recipientId: string, channelLogin: string, question: string) {
+    const botId = this.env.STREAMLORE_BOT_USER_ID || '';
+    if (!numericId(botId) || !numericId(recipientId) || !/^[a-z0-9_]{1,25}$/.test(channelLogin) || !loreQuestion(question)) throw new Error('Invalid personal request.');
+    this.ready ||= this.initialize(botId); await this.ready;
+    if (!this.oauth?.account(botId)) return { delivery: 'bot_not_connected', message: 'The StreamLore bot must be connected before it can send Whispers.' };
+    if (recipientId === botId) return { delivery: 'self', message: 'Connect your viewer account. Twitch cannot Whisper to the sending bot itself.' };
+    const now = Date.now();
+    if (now - (this.personalLookupAt.get(recipientId) || 0) < 2000) return { delivery: 'rate_limited', message: 'Wait a moment before asking another question.' };
+    if (this.personalLookupAt.size > 1000) this.personalLookupAt.clear();
+    this.personalLookupAt.set(recipientId, now);
+    const known = communities.find(item => item.login === channelLogin);
+    let channelId: string, channelName: string;
+    if (known) { channelId = known.channelId; channelName = known.displayName; }
+    else {
+      const response = await fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(channelLogin)}`, { headers: { Authorization: `Bearer ${await this.appToken()}`, 'Client-Id': this.env.TWITCH_CLIENT_ID! }, signal: AbortSignal.timeout(10000) });
+      const users = await response.json() as { data?: { id: string; display_name: string }[] };
+      const channel = users.data?.[0];
+      if (!response.ok || !channel || !numericId(channel.id)) return { delivery: 'no_match', message: 'This Twitch channel could not be found.' };
+      channelId = channel.id; channelName = channel.display_name;
+    }
+    const entry = channelId === botId ? this.runtime!.loreAnswer(question) : await this.env.CHANNELS.get(this.env.CHANNELS.idFromName(channelId)).lookupPersonalLore(channelId, question);
+    if (!entry) return { delivery: 'no_match', message: `No reviewed lore or sourced starter definition matches in ${channelName}.`, channel: channelName };
+    try {
+      const sent = await this.whisper!(question, recipientId, botId, { entry, channelName });
+      return { delivery: sent ? 'accepted' : 'rate_limited', message: sent ? `Whisper requested for ${channelName} · ${entry.term}. Check your Twitch Whispers; Twitch may filter delivery.` : 'Whisper limits reached. Wait 15 seconds, or try again later if today’s recipient limit was reached.', channel: channelName, term: entry.term };
+    } catch { return { delivery: 'failed', message: 'Twitch could not accept the Whisper. Check recipient privacy settings and the bot’s phone verification.', channel: channelName, term: entry.term }; }
+  }
 
   async fetch(request: Request): Promise<Response> {
     const channelId = request.headers.get('X-StreamLore-Channel') || '';
@@ -123,6 +186,7 @@ export class StreamLoreChannel extends DurableObject<Env> {
   }
 
   private async initialize(channelId: string) {
+    if (this.channelId && this.channelId !== channelId) throw new Error('Channel mismatch.');
     this.channelId = channelId;
     const env = this.env, db = durableDatabase(this.ctx.storage);
     this.database = db;
@@ -142,9 +206,11 @@ export class StreamLoreChannel extends DurableObject<Env> {
     if (oauthReady(env)) {
       this.oauth = createTwitchOAuthWithDatabase({ databasePath: ':durable:', clientId: env.TWITCH_CLIENT_ID!, clientSecret: env.TWITCH_CLIENT_SECRET!, redirectUri: `${env.STREAMLORE_PUBLIC_URL}/auth/twitch/callback`, encryptionKey: env.STREAMLORE_TOKEN_ENCRYPTION_KEY!, extraScopes: botScopes,
         states: persistentMap(this.ctx.storage, 'oauth-states'), generations: persistentMap(this.ctx.storage, 'oauth-generations'),
+        ...(channelId === env.STREAMLORE_BOT_USER_ID ? { scopes: ['user:manage:whispers'] } : {}),
         makeState: (id, nonce) => oauthRoutingState(id, nonce, env.STREAMLORE_TOKEN_ENCRYPTION_KEY!),
         onConnect: async account => {
           runtime.setChannel({ ...store.read().channel, login: account.login, displayName: account.displayName, profileImageUrl: account.profileImageUrl });
+          if (channelId === env.STREAMLORE_BOT_USER_ID) { this.chatStatus(false, 'StreamLore personal Whisper sender connected.'); await this.ctx.storage.setAlarm(Date.now() + 3600000); return; }
           try { await this.subscribe(account); await this.refreshChannel(); await this.ctx.storage.setAlarm(Date.now() + 3600000); } catch { this.chatStatus(false, 'Twitch webhook setup failed. Reconnect with chat, bot, and Whisper permissions.'); }
         },
         onDisconnect: async () => { await this.unsubscribe(); await this.ctx.storage.deleteAlarm(); this.chatStatus(false, 'Broadcaster disconnected. Public definitions remain readable.'); },
@@ -157,7 +223,7 @@ export class StreamLoreChannel extends DurableObject<Env> {
     }
     this.whisper = createLoreWhispers({ answer: runtime.loreAnswer,
       usage: this.ctx.storage.kv.get<WhisperUsage>('whisper-usage'), saveUsage: usage => { this.ctx.storage.kv.put('whisper-usage', usage); },
-      send: async (recipient, entry) => { await this.api(`whispers?${new URLSearchParams({ from_user_id: channelId, to_user_id: recipient })}`, { method: 'POST', body: JSON.stringify({ message: whisperText(entry, store.read().channel.displayName) }) }); },
+      send: async (recipient, entry, channelName) => { await this.api(`whispers?${new URLSearchParams({ from_user_id: channelId, to_user_id: recipient })}`, { method: 'POST', body: JSON.stringify({ message: whisperText(entry, channelName || store.read().channel.displayName) }) }); },
     });
     app.use('/api/extension', express.json({ limit: '80kb', strict: true }));
     app.use('/api/extension', async (req, res, next) => {
@@ -217,9 +283,11 @@ export class StreamLoreChannel extends DurableObject<Env> {
     this.runtime?.setTwitchStatus({ configured: Boolean(this.oauth?.account(this.channelId)), connected, message });
   }
   private async appToken(): Promise<string> {
+    if (this.appAccess && this.appAccess.expiresAt > Date.now() + 60000) return this.appAccess.token;
     const response = await fetch('https://id.twitch.tv/oauth2/token', { method: 'POST', body: new URLSearchParams({ client_id: this.env.TWITCH_CLIENT_ID!, client_secret: this.env.TWITCH_CLIENT_SECRET!, grant_type: 'client_credentials' }), signal: AbortSignal.timeout(10000) });
-    const data = await response.json() as { access_token?: string };
+    const data = await response.json() as { access_token?: string; expires_in?: number };
     if (!response.ok || !data.access_token) throw new Error('Twitch app authorization failed.');
+    this.appAccess = { token: data.access_token, expiresAt: Date.now() + Math.max(0, Number(data.expires_in) || 0) * 1000 };
     return data.access_token;
   }
   private async subscribe(account: TwitchAccount) {
@@ -247,7 +315,8 @@ export class StreamLoreChannel extends DurableObject<Env> {
     const validate = async (force = false) => fetch('https://id.twitch.tv/oauth2/validate', { headers: { Authorization: `OAuth ${await this.oauth!.getAccessToken(this.channelId, force)}` }, signal: AbortSignal.timeout(10000) });
     let response = await validate(); if (response.status === 401) response = await validate(true);
     const data = await response.json() as { user_id?: string; client_id?: string; scopes?: string[] };
-    if (!response.ok || data.user_id !== this.channelId || data.client_id !== this.env.TWITCH_CLIENT_ID || !['user:read:chat', 'user:write:chat', ...botScopes].every(scope => data.scopes?.includes(scope))) throw new Error('Twitch authorization needs reconnecting.');
+    const required = this.channelId === this.env.STREAMLORE_BOT_USER_ID ? ['user:manage:whispers'] : ['user:read:chat', 'user:write:chat', ...botScopes];
+    if (!response.ok || data.user_id !== this.channelId || data.client_id !== this.env.TWITCH_CLIENT_ID || !required.every(scope => data.scopes?.includes(scope))) throw new Error('Twitch authorization needs reconnecting.');
     this.ctx.storage.kv.put('last-token-validation', Date.now());
   }
   private async refreshChannel() {

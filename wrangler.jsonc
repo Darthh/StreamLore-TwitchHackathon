@@ -12,6 +12,7 @@
     "run_worker_first": [
       "/",
       "/install",
+      "/viewer",
       "/api/*",
       "/auth/*",
       "/twitch/*",
@@ -37,7 +38,8 @@
   ],
   "vars": {
     "STREAMLORE_PUBLIC_URL": "https://streamlore.patrickvaldivia123.workers.dev",
-    "TWITCH_EXTENSION_CLIENT_ID": "m7tirdtzbocxkfacsis37lvc81i4uc"
+    "TWITCH_EXTENSION_CLIENT_ID": "m7tirdtzbocxkfacsis37lvc81i4uc",
+    "STREAMLORE_BOT_USER_ID": "1603933742"
   },
   "observability": {
     "enabled": true,

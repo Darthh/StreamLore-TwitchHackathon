@@ -1,11 +1,6 @@
 import type { Lore } from '../shared/types.ts';
-
-export function loreQuestion(message: string): string | null {
-  const command = message.trim().match(/^!lore\s+(.{1,200})$/i);
-  if (command) return command[1].trim();
-  const question = message.trim();
-  return question.length <= 300 && /^(?:what(?:['’]s| is| are| does)|who(?:['’]s| is| are)|why (?:is|does|do|are))\s+.+/i.test(question) ? question : null;
-}
+import { loreQuestion } from '../shared/chat-questions.ts';
+export { loreQuestion } from '../shared/chat-questions.ts';
 
 export function whisperText(entry: Lore, channelName: string): string {
   const sourceLink = entry.clipUrl || entry.references?.[0]?.url || '';
@@ -21,17 +16,17 @@ export function whisperText(entry: Lore, channelName: string): string {
 export type WhisperUsage = { day: string; lastSend: number; recipients: [string, number][] };
 export function createLoreWhispers({ answer, send, now = Date.now, usage, saveUsage }: {
   answer: (question: string) => Lore | undefined;
-  send: (recipientId: string, entry: Lore) => Promise<void>;
+  send: (recipientId: string, entry: Lore, channelName?: string) => Promise<void>;
   now?: () => number;
   usage?: WhisperUsage;
   saveUsage?: (usage: WhisperUsage) => void;
 }) {
   let day = usage?.day || '', lastSend = usage?.lastSend ?? -Infinity;
   const recipients = new Map<string, number>(usage?.recipients || []);
-  return async (message: string, recipientId: string, senderId: string): Promise<boolean> => {
+  return async (message: string, recipientId: string, senderId: string, context?: { entry: Lore; channelName: string }): Promise<boolean> => {
     const question = loreQuestion(message);
     if (!question || !/^[1-9]\d{0,24}$/.test(recipientId) || recipientId === senderId) return false;
-    const entry = answer(question);
+    const entry = context?.entry ?? answer(question);
     if (!entry) return false;
     const time = now(), currentDay = new Date(time).toISOString().slice(0, 10);
     if (day !== currentDay) { day = currentDay; recipients.clear(); }
@@ -39,7 +34,7 @@ export function createLoreWhispers({ answer, send, now = Date.now, usage, saveUs
     if (time - lastSend < 1000 || time - (recipients.get(recipientId) ?? -Infinity) < 15_000 || (!recipients.has(recipientId) && recipients.size >= 40)) return false;
     lastSend = time; recipients.set(recipientId, time);
     saveUsage?.({ day, lastSend, recipients: [...recipients] });
-    await send(recipientId, entry);
+    await send(recipientId, entry, context?.channelName);
     return true;
   };
 }
