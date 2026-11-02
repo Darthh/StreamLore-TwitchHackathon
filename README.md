@@ -281,6 +281,13 @@ StreamLore uses the **current channel**, rather than a global dictionary. The bu
 
 Each entry carries source links and is labeled **starter reference**, not channel endorsement or moderator approval. Moderator-approved definitions take priority. Creators can hide starter references in the configuration view, or add reviewed phrases for their own community. New AI lore still requires moderator review. Add sourced entries to `server/community-lore.ts`; do not add unverified first-use clips or scrape private messages.
 
+<p align="center">
+  <img src="docs/assets/streamlore-private-xqc.png" alt="Local 320px panel preview privately answering What is a juicer in xQc's community" width="300">
+  <img src="docs/assets/streamlore-private-caedrel.png" alt="Local 320px panel preview privately answering What is Sally in Caedrel's community" width="300">
+</p>
+
+<p align="center"><em>Browser-verified local dataset previews. These screenshots do not show a live Twitch installation or delivered Whisper.</em></p>
+
 There are two private answer paths:
 
 1. **Inside the Extension:** select **Ask privately** and type the question. `POST /api/extension/ask` derives the channel from the verified Twitch JWT and returns the answer only in that panel. Anonymous readers can ask. Questions are neither stored in channel chat history nor broadcast over SSE.
@@ -411,6 +418,8 @@ Use an always-running Node process behind public HTTPS. Native chat connections 
 Default files are `data/demo.sqlite`, `data/live.sqlite`, and native channel files under `data/extensions/`; `STREAMLORE_DB_PATH` and `STREAMLORE_EXTENSION_DATA_DIR` override those locations. The OAuth account database is also under the native directory. Back up SQLite consistently, including WAL state when applicable. The Docker image and public deployment have not been verified here.
 
 The [native launch guide](docs/twitch-extension-launch.md) covers registration, identity linking, allowlists, required configuration, Hosted Test, listing fields, review, and release.
+
+For Cloudflare Tunnel setup, including the temporary HTTPS test path and stable named-tunnel configuration, follow [Cloudflare hosting](docs/cloudflare-setup.md). A tunnel publishes the running Node host; it does not move SQLite or the chat process into Workers.
 
 ## Demo walkthrough
 

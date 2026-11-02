@@ -30,6 +30,8 @@ Existing chat-only grants remain usable but cannot send Whispers until reauthori
 
 ## Launch process
 
+For Cloudflare-based hosting of the existing Node backend, follow [Cloudflare setup](cloudflare-setup.md). A test tunnel can provide HTTPS while the application runs on your machine; a stable production origin also requires a named tunnel/domain and a persistent running host.
+
 **Account prerequisite:** Enable two-factor authentication on the Twitch developer account in [Security settings](https://www.twitch.tv/settings/security). Twitch blocks Extension creation until 2FA is enabled. Complete that account-security step yourself; never put verification or recovery codes in project files or chat.
 
 1. **Run the EBS on persistent hosting.** The Extension Backend Service is the Node.js 24+ server in this repository. Run `npm install`, `npm run build`, and `npm start` behind a public HTTPS address. Keep its SQLite data and encryption key across restarts; an ephemeral function filesystem cannot preserve channel history or OAuth credentials. Hosting may have costs: check your account’s actual allowance before provisioning anything.
