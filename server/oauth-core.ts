@@ -20,6 +20,8 @@ export type OAuthOptions = {
   table?: string;
   maxAccounts?: number;
   page?: { connected: string; connectedBody: string; failed: string; failedBody: string; returnUrl: string; returnLabel: string };
+  // Told how every callback ended; reasons are StreamLore's own messages and never contain tokens or identities.
+  onResult?: (outcome: { ok: boolean; reason: string }) => void;
 };
 type AccountRow = { channel_id: string; login: string; display_name: string; profile_image_url: string; credentials: Uint8Array };
 const scopes = ['user:read:chat', 'user:write:chat'];
@@ -141,11 +143,16 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   }
 
   router.get('/callback', async (request, response) => {
-    if (closed) return finishPage(response, 503, false);
+    const finish = (status: number, ok: boolean, reason: string) => { options.onResult?.({ ok, reason }); return finishPage(response, status, ok); };
+    if (closed) return finish(503, false, 'StreamLore was restarting.');
     const state = typeof request.query.state === 'string' ? request.query.state : '';
     const pending = states.get(state);
     if (pending) states.delete(state);
-    if (!pending || pending.expiresAt <= Date.now() || (pending.channelId && generations.get(pending.channelId) !== pending.generation) || request.query.error || typeof request.query.code !== 'string' || !request.query.code || request.query.code.length > 4096) return finishPage(response, 400, false);
+    if (!pending) return finish(400, false, 'This sign-in link was already used, or a newer one replaced it.');
+    if (pending.expiresAt <= Date.now()) return finish(400, false, 'This sign-in link expired after five minutes.');
+    if (pending.channelId && generations.get(pending.channelId) !== pending.generation) return finish(400, false, 'A newer sign-in for this account replaced this one.');
+    if (request.query.error) return finish(400, false, 'Twitch reported that the request was declined.');
+    if (typeof request.query.code !== 'string' || !request.query.code || request.query.code.length > 4096) return finish(400, false, 'Twitch returned no authorization code.');
     let credentials: Credentials | undefined;
     let stored = false;
     try {
@@ -161,10 +168,10 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
       db.prepare(`INSERT INTO ${table} (channel_id, login, display_name, profile_image_url, credentials) VALUES (?, ?, ?, ?, ?) ON CONFLICT(channel_id) DO UPDATE SET login=excluded.login, display_name=excluded.display_name, profile_image_url=excluded.profile_image_url, credentials=excluded.credentials`).run(connected.channelId, connected.login, connected.displayName, connected.profileImageUrl, encrypt(connected.channelId, credentials));
       stored = true;
       await options.onConnect(connected);
-      return finishPage(response, 200, true);
-    } catch {
+      return finish(200, true, 'Connected.');
+    } catch (error) {
       if (credentials && !stored) await revoke(credentials.accessToken);
-      return finishPage(response, 400, false);
+      return finish(400, false, error instanceof Error ? error.message.slice(0, 200) : 'Twitch could not complete the sign-in.');
     }
   });
 
