@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "streamlore",
+  "main": "cloudflare/index.ts",
+  "account_id": "f1bc349d0ee753076f1f03c19165ce75",
+  "compatibility_date": "2026-11-02",
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": { "directory": "./dist-worker", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "CHANNELS", "class_name": "StreamLoreChannel" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StreamLoreChannel"] }],
+  "vars": {
+    "STREAMLORE_PUBLIC_URL": "https://streamlore.patrickvaldivia123.workers.dev",
+    "TWITCH_EXTENSION_CLIENT_ID": "m7tirdtzbocxkfacsis37lvc81i4uc"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+}

@@ -27,7 +27,7 @@ function decodePart(part: string, maxBytes: number): Buffer {
 
 function parseObject(part: string, maxBytes: number): Record<string, unknown> {
   let parsed: unknown;
-  try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(decodePart(part, maxBytes))); }
+  try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(decodePart(part, maxBytes))); }
   catch { return fail(); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail();
   return parsed as Record<string, unknown>;

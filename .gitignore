@@ -1,6 +1,9 @@
 node_modules/
 dist/
 dist-extension/
+dist-worker/
+.wrangler/
+.dev.vars*
 release/
 data/
 .env
