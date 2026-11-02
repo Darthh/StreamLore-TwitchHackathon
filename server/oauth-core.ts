@@ -10,11 +10,11 @@ export type OAuthOptions = {
   onConnect: (account: TwitchAccount) => void | Promise<void>;
   onDisconnect: (channelId: string) => void | Promise<void>;
   extraScopes?: string[];
+  // Replaces every requested and required scope (broadcaster chat, Whisper, and extraScopes) with exactly these.
+  scopes?: string[];
   makeState?: (channelId: string, nonce: string) => string;
   states?: Map<string, { channelId: string; expiresAt: number; generation: number }>;
   generations?: Map<string, number>;
-  // Replaces the broadcaster chat scopes (and the requested Whisper scope) with exactly these.
-  scopes?: string[];
   // Accepts whichever Twitch user authorizes; begin() is then called without a channel ID.
   anyAccount?: boolean;
   table?: string;
@@ -40,8 +40,8 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   if (redirect.username || redirect.password || redirect.hash || redirect.search) throw new Error('Twitch OAuth redirect URI must not contain credentials, query parameters, or a fragment.');
   const table = options.table || 'twitch_oauth_accounts';
   if (!/^[a-z_]{1,40}$/.test(table)) throw new Error('Twitch account table names may contain only lowercase letters and underscores.');
-  const required = [...(options.scopes || scopes), ...(options.extraScopes || [])];
-  const requested = [...new Set(options.scopes ? required : [...scopes, 'user:manage:whispers', ...(options.extraScopes || [])])];
+  const required = options.scopes ?? [...scopes, ...(options.extraScopes || [])];
+  const requested = [...new Set(options.scopes ?? [...scopes, 'user:manage:whispers', ...(options.extraScopes || [])])];
   const maxAccounts = options.maxAccounts ?? 1000;
   const page = options.page || { connected: 'Your channel is connected.', connectedBody: 'Chat is authorized. Return to your StreamLore extension configuration to check its connection and start welcoming viewers.', failed: 'We could not connect your channel.', failedBody: 'This connection request expired, was already used, was declined, or did not authorize the correct broadcaster with both chat permissions. Start a new connection from your StreamLore extension configuration.', returnUrl: 'https://dashboard.twitch.tv/extensions', returnLabel: 'Return to Twitch extensions' };
   db.exec(`PRAGMA busy_timeout = 5000; CREATE TABLE IF NOT EXISTS ${table} (channel_id TEXT PRIMARY KEY, login TEXT NOT NULL, display_name TEXT NOT NULL, profile_image_url TEXT NOT NULL, credentials BLOB NOT NULL)`);
@@ -101,7 +101,7 @@ export function createTwitchOAuthWithDatabase(options: OAuthOptions, db: SqlData
   async function validateToken(channelId: string, accessToken: string): Promise<string> {
     const token = await providerRequest('https://id.twitch.tv/oauth2/validate', { headers: { Authorization: `OAuth ${accessToken}` } });
     if (token.client_id !== options.clientId || typeof token.user_id !== 'string' || !channelPattern.test(token.user_id) || (channelId && token.user_id !== channelId)) throw new Error('The Twitch account you authorized does not match this channel. Sign in as its broadcaster and try again.');
-    if (!Array.isArray(token.scopes) || !required.every(scope => token.scopes.includes(scope))) throw new Error('Both Twitch chat permissions are required. Reconnect and allow reading and sending chat messages.');
+    if (!Array.isArray(token.scopes) || !required.every(scope => token.scopes.includes(scope))) throw new Error('Required Twitch permissions are missing. Reconnect and allow the requested access.');
     return token.user_id;
   }
 

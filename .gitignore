@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-extension/
+dist-viewer-extension/
 dist-worker/
 .wrangler/
 .dev.vars*

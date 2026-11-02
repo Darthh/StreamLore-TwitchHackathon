@@ -1,14 +1,6 @@
 import type { Lore } from '../shared/types.ts';
-
-const asking = /^(?:(?:what|wat|wut)(?:['’]?s|\s+(?:is|are|r|does|do))|wtf\s+(?:is|are)|who(?:['’]?s|\s+(?:is|are))|why\s+(?:is|does|do|are))\s+.+/i;
-
-export function loreQuestion(message: string): string | null {
-  const command = message.trim().match(/^!lore\s+(.{1,200})$/i);
-  if (command) return command[1].trim();
-  // Chat questions often open with @mentions and skip the apostrophe: "@xqc whats a juicer".
-  const question = message.trim().replace(/^(?:@\w{1,25}[\s,:]+)+/, '');
-  return question.length <= 300 && asking.test(question) ? question : null;
-}
+import { loreQuestion } from '../shared/chat-questions.ts';
+export { loreQuestion } from '../shared/chat-questions.ts';
 
 export function whisperText(entry: Lore, channelName: string): string {
   const sourceLink = entry.clipUrl || entry.references?.[0]?.url || '';
@@ -41,15 +33,15 @@ export function createWhisperLimiter({ now = Date.now, usage, saveUsage }: Usage
 
 export function createLoreWhispers({ answer, send, ...usage }: UsageOptions & {
   answer: (question: string) => Lore | undefined;
-  send: (recipientId: string, entry: Lore) => Promise<void>;
+  send: (recipientId: string, entry: Lore, channelName?: string) => Promise<void>;
 }) {
   const reserve = createWhisperLimiter(usage);
-  return async (message: string, recipientId: string, senderId: string): Promise<boolean> => {
+  return async (message: string, recipientId: string, senderId: string, context?: { entry: Lore; channelName: string }): Promise<boolean> => {
     const question = loreQuestion(message);
     if (!question || !/^[1-9]\d{0,24}$/.test(recipientId) || recipientId === senderId) return false;
-    const entry = answer(question);
+    const entry = context?.entry ?? answer(question);
     if (!entry || !reserve(recipientId)) return false;
-    await send(recipientId, entry);
+    await send(recipientId, entry, context?.channelName);
     return true;
   };
 }

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "StreamLore — personal Twitch lore",
+  "version": "0.1.0",
+  "description": "Enable once. Ask about the current streamer's slang in Twitch chat and receive a private StreamLore Whisper.",
+  "permissions": ["storage", "cookies"],
+  "host_permissions": [],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "StreamLore", "default_popup": "popup.html", "default_icon": "logo.png" },
+  "icons": { "128": "logo.png" },
+  "content_scripts": [{ "matches": ["https://www.twitch.tv/*"], "js": ["content.js"], "run_at": "document_idle" }]
+}
