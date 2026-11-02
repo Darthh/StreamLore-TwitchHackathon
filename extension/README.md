@@ -18,6 +18,10 @@ npm run build:extension -- --api-url http://127.0.0.1:8787 --local-test
 
 Use the local Express server’s `/extension/panel.html?demo=1` only for a read-only fictional preview. Demo mode is accepted only on loopback. It cannot perform writes or bypass Twitch authorization. Inside Twitch, `onAuthorized` provides the latest JWT, sent in the `Authorization: Bearer …` header on every EBS request. The EBS verifies the role, channel, identity, signature, and expiration; URL parameters never select the channel. Tokens stay in memory.
 
+The viewer opens on **Ask privately**. Questions go to `POST /api/extension/ask` and answers stay in that panel. The server does not add them to chat history or broadcast them. Moderator-approved definitions take priority over the labeled starter dataset, currently xQc’s Juicer/Juicers and Caedrel’s Sally. Creators can disable starter references. Preview either dataset locally by appending `&community=xqc` or `&community=caedrel` to the demo URL; these previews send no Twitch messages.
+
+Direct questions and `!lore <phrase>` in connected Twitch chat use private Helix Whispers, requiring `user:manage:whispers` and a phone-verified sender. Reconnect old chat-only grants. Delivery is subject to recipient privacy settings, Twitch limits, and silent drops. No private question falls back to a public answer. Each channel must install the Extension and authorize its account before chat monitoring works. See the [launch guide](../docs/twitch-extension-launch.md#private-phrase-answers).
+
 Set these entry paths in the Twitch Extensions Manager:
 
 | View | Asset path |

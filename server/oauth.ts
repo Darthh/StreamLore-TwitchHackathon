@@ -108,7 +108,7 @@ export function createTwitchOAuth(options: Options) {
     const state = randomBytes(32).toString('base64url');
     states.set(state, { channelId, expiresAt: Date.now() + 5 * 60_000, generation });
     const authorize = new URL('https://id.twitch.tv/oauth2/authorize');
-    authorize.search = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', scope: scopes.join(' '), force_verify: 'true', state }).toString();
+    authorize.search = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', scope: [...scopes, 'user:manage:whispers'].join(' '), force_verify: 'true', state }).toString();
     return authorize.toString();
   }
 

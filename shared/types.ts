@@ -3,7 +3,8 @@ export type ContentAuthor = { id: string; login: string; displayName: string };
 export type Lore = {
   id: string; term: string; aliases: string[]; explanation: string; origin: string;
   clipUrl: string; category: LoreCategory; status: 'approved' | 'pending' | 'nominated' | 'rejected';
-  votes: number; createdAt: string; source: 'demo' | 'moderator' | 'ai' | 'community';
+  votes: number; createdAt: string; source: 'demo' | 'moderator' | 'ai' | 'community' | 'starter';
+  references?: { title: string; url: string }[];
   author?: ContentAuthor; reviewedBy?: ContentAuthor;
 };
 export type Moment = {
@@ -16,9 +17,10 @@ export type StreamState = {
   mode: 'demo' | 'live';
   channel: { login: string; displayName: string; profileImageUrl?: string; category: string; title: string; live: boolean; startedAt: string };
   stream: { objective: string; summary: string[]; updatedAt: string };
-  moments: Moment[]; lore: Lore[]; nominations: Lore[]; loreDrop: Lore | null;
+  moments: Moment[]; lore: Lore[]; starterLore?: Lore[]; nominations: Lore[]; loreDrop: Lore | null;
   stats: { moments: number; lore: number; pending: number };
   connection: { twitch: Connection; ai: Connection };
+  starterLoreEnabled?: boolean;
 };
 export type ModeratorState = { pending: Lore[]; rejected: Lore[]; captions: string; chat: { user: string; text: string; at: string }[] };
 export type AuthState = { authenticated: boolean; demoAccess: boolean; extensionManaged?: boolean };

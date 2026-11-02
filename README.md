@@ -36,6 +36,7 @@ Built for the **[Codex × TwitchCon Hackathon](https://twitchcon-codex.devpost.c
 - [Getting started](#getting-started)
 - [Runtime modes and configuration](#runtime-modes-and-configuration)
 - [Twitch chat integration](#twitch-chat-integration)
+- [Private answers and community dataset](#private-answers-and-community-dataset)
 - [Captions, clips, and optional AI](#captions-clips-and-optional-ai)
 - [Pages and API](#pages-and-api)
 - [Technology and repository map](#technology-and-repository-map)
@@ -67,7 +68,7 @@ Current-stream context resets for a new broadcast. Channel lore stays with the c
 | --- | --- |
 | Stream catch-up | Short recap, current objective, and timeline of milestones, highlights, setbacks, and context. |
 | Channel lore | Searchable jokes, traditions, characters, and moments with aliases and origin references. |
-| Viewer questions | Questions such as “Why is chat saying refrigerator?” resolve against approved terms and aliases. Unknown phrases return a no-match response. |
+| Viewer questions | **Ask privately** answers only the requesting viewer, using this channel’s approved lore or sourced starter definitions. Unknown phrases return a no-match response. |
 | Moderator review | Draft, edit, approve, reject, or nominate entries. Unreviewed drafts stay private. |
 | Community ballots | Moderator-reviewed nominations enter the library at **five votes**. |
 | On-stream lore drops | Approved cards appear on a transparent browser-source overlay and clear after **18 seconds**. |
@@ -197,6 +198,8 @@ No credentials are needed for a fresh demo checkout.
 | [localhost:5173](http://localhost:5173/) | Full companion and local demo moderator workspace. |
 | [localhost:5173/install](http://localhost:5173/install) | Native installation readiness and package download. |
 | [Native panel preview](http://localhost:5173/extension/panel.html?demo=1) | Read-only fictional panel without Twitch authorization. |
+| [xQc phrase preview](http://localhost:5173/extension/panel.html?demo=1&community=xqc) | Ask “What is a juicer?” against the sourced starter dataset. |
+| [Caedrel phrase preview](http://localhost:5173/extension/panel.html?demo=1&community=caedrel) | Ask “What is Sally?” against the sourced starter dataset. |
 | [localhost:5173/overlay](http://localhost:5173/overlay) | Transparent OBS/browser-source output. |
 | [localhost:8787/api/health](http://localhost:8787/api/health) | API process health. |
 
@@ -249,7 +252,7 @@ TWITCH_CHANNEL=your_channel_login
 STREAMLORE_PUBLIC_URL=https://your-companion.example
 ```
 
-The moderator password must contain at least 12 characters. Use a Twitch user token issued for the configured application with `user:read:chat` and `user:write:chat`. The broadcaster's own account is the simplest setup; command replies are sent as that account. Standalone live mode starts with an empty database and does not publish demo history.
+The moderator password must contain at least 12 characters. Use a Twitch user token issued for the configured application with `user:read:chat` and `user:write:chat`; add `user:manage:whispers` for private chat answers. The broadcaster's own account is the simplest setup; replies are sent as that account. Standalone live mode starts without fictional demo history; recognized channels can use the sourced starter references.
 
 ## Twitch chat integration
 
@@ -257,7 +260,8 @@ The moderator password must contain at least 12 characters. Use a Twitch user to
 | --- | --- |
 | `!catchup` | Current recap and companion-page link. |
 | `!lore` | Available example terms and the library link. |
-| `!lore refrigerator` | Approved explanation and its origin clip or detail-page link. |
+| `!lore refrigerator` | Private Whisper with the known definition, when the connected account has Whisper permission. |
+| `What is a juicer?` / `What is Sally?` | A known phrase in the current community triggers a private Whisper; it never falls back to a public answer. |
 | `!lorevote summit tax` | Vote for a moderator-reviewed nomination. |
 
 The bot uses EventSub WebSockets, validates authorization at startup and hourly, handles reconnects, deduplicates events, and throttles outgoing replies. Native OAuth accounts support encrypted refresh-token rotation and a refresh/retry after an expired-token response. The standalone `TWITCH_ACCESS_TOKEN` setup requires manual replacement when authorization expires.
@@ -265,6 +269,26 @@ The bot uses EventSub WebSockets, validates authorization at startup and hourly,
 Chat and native-panel votes use Twitch identities; the standalone browser ballot uses a signed cookie. Clearing cookies or switching browsers can bypass the standalone limit. Native votes use signed-in `U` opaque identities, while anonymous `A` identities are never stored for voting. This is a community ballot, not a high-assurance election system.
 
 `localhost` links work only on your machine. Set the public URL before connecting viewers. EventSub is an outbound connection, so this implementation does not require a Twitch webhook. [Twitch chat authentication](https://dev.twitch.tv/docs/chat/authenticating/)
+
+## Private answers and community dataset
+
+StreamLore uses the **current channel**, rather than a global dictionary. The bundled [starter dataset](server/community-lore.ts) includes:
+
+| Channel | Phrase | Meaning |
+| --- | --- | --- |
+| xQc (`71092938`) | Juicer / Juicers | A fan or member of xQc’s community. |
+| Caedrel (`92038375`) | Sally | Caedrel’s nickname following his reaction to Fnatic’s lost lead against G2 in the 2024 LEC Summer final. |
+
+Each entry carries source links and is labeled **starter reference**, not channel endorsement or moderator approval. Moderator-approved definitions take priority. Creators can hide starter references in the configuration view, or add reviewed phrases for their own community. New AI lore still requires moderator review. Add sourced entries to `server/community-lore.ts`; do not add unverified first-use clips or scrape private messages.
+
+There are two private answer paths:
+
+1. **Inside the Extension:** select **Ask privately** and type the question. `POST /api/extension/ask` derives the channel from the verified Twitch JWT and returns the answer only in that panel. Anonymous readers can ask. Questions are neither stored in channel chat history nor broadcast over SSE.
+2. **From Twitch chat:** type a direct question or `!lore <phrase>`. The connected account sends a Helix Whisper to the asking viewer’s numeric Twitch ID. Chat questions themselves are public on Twitch; only the answer is private. Unknown phrases, bot self-messages, and shared-chat copies produce no Whisper. Private questions never fall through to public bot replies.
+
+Reconnect the broadcaster account to grant **`user:manage:whispers`**. Existing chat-only grants continue reading chat but cannot send Whispers. Twitch requires a phone-verified sender, limits Whispers to **40 unique recipients per day**, and can reject or silently drop messages even after a successful API response. StreamLore bounds messages to 500 characters and throttles requests; the panel remains the dependable answer surface. [Twitch Whisper requirements](https://dev.twitch.tv/docs/chat/whispers/)
+
+The Extension must be installed on the channel and its broadcaster must connect the account before chat monitoring and Whispers work. Bundling xQc/Caedrel definitions does not install StreamLore on their channels or authorize their accounts. Local dataset previews send no Twitch messages.
 
 ## Captions, clips, and optional AI
 
@@ -309,6 +333,7 @@ AI lore never publishes automatically. Creators review its explanation and origi
 | Native channel companion | `/channels/:channelId` | Read-only public channel context. |
 | OBS overlay | `/overlay` or `/channels/:channelId/overlay` | Transparent output; `?preview=1` shows an idle helper. |
 | Native viewer state | `GET /api/extension/state` | Verified Twitch Helper JWT. |
+| Private phrase answer | `POST /api/extension/ask` | Verified JWT, including anonymous readers; channel comes from signed claims. |
 | Native creator state | `GET /api/extension/mod/state` | Verified creator identity and connected channel account. |
 | Native publishing | `/api/extension/mod/*` | Verified creator and connected broadcaster account. |
 | Channel connection | `POST /api/extension/connect` | Broadcaster only; returns Twitch authorization URL. |
@@ -369,7 +394,7 @@ npm test
 npm run build
 ```
 
-The current suite contains **58 passing tests**, covering review visibility, authentication, forged/expired JWTs, channel isolation, OAuth identity binding, encrypted credentials, refresh rotation, voting, creator attribution, content removal, chat replies, AI failure handling, and ZIP contents. The build includes TypeScript checking.
+The local suite covers review visibility, authentication, forged/expired JWTs, channel isolation, OAuth identity binding, encrypted credentials, refresh rotation, voting, creator attribution, content removal, private phrase answers, Whisper limits and transport, chat replies, AI failure handling, and ZIP contents. The build includes TypeScript checking. Provider calls are mocked; a passing suite does not establish live Whisper delivery.
 
 Additional local checks exercised production-mode HTTP routes and browser previews at desktop, phone, and the native panel's 320px width. Provider integration tests use mocks. These results do not establish public hosting, Docker runtime behavior, live OAuth consent, native Twitch installation, or review approval.
 
@@ -427,6 +452,7 @@ Generated directories, credentials, local evidence, and database files are ignor
 | Native writes are rejected | Check the signed role, channel, creator identity, and connected broadcaster account. Unlinked moderators must share identity. |
 | OAuth says the channel does not match | Connect as the broadcaster for the channel that opened configuration. |
 | No chat replies | Check account authorization, scopes, EventSub connectivity, chat restrictions, and the reply cooldown. |
+| No private Whisper | Reconnect with `user:manage:whispers`; check sender phone verification, recipient privacy settings, and Twitch’s 40-recipient daily limit. Use **Ask privately** in the panel. |
 | AI is unavailable | Configure the API key and model access, or add moments and lore manually. |
 | A clip has no explanation | Supply a relevant transcript; the model cannot watch a clip from its URL. |
 | Unknown joke returns no match | Add an approved term or alias. The lookup does not invent an origin. |
@@ -443,6 +469,7 @@ Generated directories, credentials, local evidence, and database files are ignor
 - **Prototype hosting:** the backend uses synchronous SQLite and a bounded in-process channel registry. Production load, recovery, and deployment durability need further validation.
 - **Ballot identity:** standalone cookie votes are bypassable; native votes use verified Twitch opaque IDs. Chat and panel voting currently use separate identity namespaces.
 - **External availability:** API keys, token permissions, provider limits, and hosting affect connected features. A passing local test does not verify those services.
+- **Private chat delivery:** Whispers require each broadcaster’s authorization, cannot be sent to the sending account itself, and may be silently dropped by Twitch. The starter dataset currently covers two phrases across two communities.
 - **Review assets and policies:** the operator still supplies actual support/legal URLs and completes Twitch's required review materials and mobile-device testing.
 
 ## Codex and the hackathon

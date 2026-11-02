@@ -6,6 +6,7 @@ const creatorPage = mode === 'config' || mode === 'live';
 const helper = window.Twitch?.ext;
 const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 const demo = isLoopback && new URLSearchParams(location.search).get('demo') === '1';
+const previewCommunity = demo ? new URLSearchParams(location.search).get('community') || '' : '';
 const categories = ['Inside joke', 'Tradition', 'Character', 'Moment'];
 const kindLabels = { milestone: 'Milestone', setback: 'Plot twist', highlight: 'Highlight', context: 'Context' };
 let authorization = null;
@@ -13,8 +14,10 @@ let generation = 0;
 let state = null;
 let status = null;
 let moderator = null;
-let tab = 'catchup';
+let tab = 'lore';
 let search = '';
+let privateAnswer = null;
+let questionText = '';
 let selectedId = null;
 let creatorBuilt = false;
 let refreshing = false;
@@ -87,7 +90,7 @@ function shareIdentityButton() { return button('Share Twitch identity', () => { 
 function normalized(value) { return String(value || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim(); }
 function findLore(question) {
   const query = ` ${normalized(question)} `;
-  return (state?.lore || []).filter(entry => entry.status === 'approved')
+  return [...(state?.lore || []), ...(state?.starterLore || [])].filter(entry => entry.status === 'approved')
     .flatMap(entry => [entry.term, ...(entry.aliases || [])].map(alias => ({ entry, alias: normalized(alias) })))
     .filter(candidate => candidate.alias && query.includes(` ${candidate.alias} `))
     .sort((a, b) => b.alias.length - a.alias.length)[0]?.entry || null;
@@ -106,7 +109,7 @@ async function request(path, body, method = 'POST') {
   requests.add(controller);
   const timer = setTimeout(() => controller.abort(), ['/mod/draft', '/mod/recap'].includes(path) ? 55000 : 20000);
   try {
-    const response = await fetch(`${origin}${demo ? '/api/state' : `/api/extension${path}`}`, {
+    const response = await fetch(`${origin}${demo ? previewCommunity ? `/api/community/${encodeURIComponent(previewCommunity)}/preview` : '/api/state' : `/api/extension${path}`}`, {
       method: body === undefined ? 'GET' : method,
       headers: { ...(demo ? {} : { Authorization: `Bearer ${authorization.token}` }), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -134,12 +137,12 @@ async function refresh() {
     status = nextStatus;
     if (canModerate() && creatorPage) moderator = await request('/mod/state');
     if (current !== generation) return;
-    if (selectedId && ![...state.lore, ...state.nominations].some(entry => entry.id === selectedId)) { selectedId = null; document.getElementById('lore-detail')?.close(); }
+    if (selectedId && ![...state.lore, ...state.nominations, ...(state.starterLore || [])].some(entry => entry.id === selectedId)) { selectedId = null; document.getElementById('lore-detail')?.close(); }
     renderChannel();
     if (!document.getElementById('viewer-content').contains(document.activeElement)) renderViewer();
     if (creatorPage) renderCreator();
     document.getElementById('waiting').hidden = true;
-    document.getElementById('connection-note').textContent = demo ? 'Read-only demo · fictional channel history' : 'Channel context · updates every 10 seconds';
+    document.getElementById('connection-note').textContent = demo ? previewCommunity ? 'Local dataset preview · no live Twitch connection or Whispers' : 'Read-only demo · fictional channel history' : 'Your questions stay private · channel context updates every 10 seconds';
   } catch (error) { if (current === generation && error?.name !== 'AbortError') feedback(readableError(error), true); }
   finally { if (current === generation) refreshing = false; }
 }
@@ -173,7 +176,7 @@ function buildShell() {
   if (isLoopback && !demo) { const preview = node('a', 'external-link', 'Open a read-only demo ↗'); preview.href = `${location.pathname}?demo=1`; preview.target = '_blank'; preview.rel = 'noopener noreferrer'; waiting.append(preview); }
   const viewer = node('section', 'viewer'); viewer.id = 'viewer'; viewer.hidden = creatorPage;
   const tabs = node('nav', 'tabs'); tabs.setAttribute('aria-label', 'StreamLore sections');
-  for (const [value, label] of [['catchup', 'Catch up'], ['lore', 'Lore library']]) { const item = button(label, () => { tab = value; search = ''; renderViewer(); }, 'tab'); item.dataset.tab = value; tabs.append(item); }
+  for (const [value, label] of [['lore', 'Ask privately'], ['catchup', 'Catch up']]) { const item = button(label, () => { tab = value; search = ''; renderViewer(); }, 'tab'); item.dataset.tab = value; tabs.append(item); }
   const viewerContent = node('div', 'viewer-content'); viewerContent.id = 'viewer-content'; viewer.append(tabs, viewerContent);
   const creator = node('section', 'creator'); creator.id = 'creator'; creator.hidden = !creatorPage;
   const footer = node('footer', 'footer'); const connection = node('span', '', 'Waiting for Twitch authorization…'); connection.id = 'connection-note'; footer.append(connection);
@@ -194,6 +197,14 @@ function renderChannel() {
   const content = node('div', 'channel-copy'); content.append(node('h1', '', state.channel.displayName || 'Your Twitch channel'), node('p', '', state.channel.title || 'Your stream. Your community’s backstory.'));
   const badge = node('span', state.mode === 'demo' ? 'badge' : state.channel.live ? 'badge live' : 'badge offline', state.mode === 'demo' ? 'DEMO' : state.channel.live ? 'LIVE' : 'OFFLINE');
   channel.append(content, badge);
+  if (demo && !creatorPage) {
+    const preview = node('label', 'community-preview'); preview.append(node('span', 'muted', 'Preview community'));
+    const select = node('select'); select.setAttribute('aria-label', 'Preview community');
+    for (const [value, label] of [['', 'TheDarthh · fictional demo'], ['xqc', 'xQc · starter dataset'], ['caedrel', 'Caedrel · starter dataset']]) { const option = node('option', '', label); option.value = value; select.append(option); }
+    select.value = previewCommunity;
+    select.addEventListener('change', () => { const url = new URL(location.href); if (select.value) url.searchParams.set('community', select.value); else url.searchParams.delete('community'); location.href = url.href; });
+    preview.append(select); channel.append(preview);
+  }
 }
 function renderViewer() {
   if (!state || creatorPage) return;
@@ -221,9 +232,26 @@ function renderViewer() {
     content.append(recap, objective, timeline, quick);
   } else {
     const question = node('form', 'ask-form'); question.id = 'ask-form';
-    const input = field(question, 'What is chat talking about?', 'question', { placeholder: 'Why is chat saying refrigerator?', max: 300, required: true }); input.value = search;
-    const ask = button('Get the backstory', null, 'button primary'); ask.type = 'submit'; question.append(ask);
-    question.addEventListener('submit', event => { event.preventDefault(); search = input.value.trim(); const answer = findLore(search); if (answer) showLore(answer); else feedback('No approved backstory matches yet. Try a phrase from chat or browse below.'); });
+    const placeholder = state.channel.login === 'xqc' ? 'What is a juicer?' : state.channel.login === 'caedrel' ? 'What is Sally?' : 'What does that phrase mean?';
+    const input = field(question, 'What is chat talking about?', 'question', { placeholder, max: 300, required: true }); input.value = questionText;
+    input.addEventListener('input', () => { questionText = input.value; });
+    question.append(node('p', 'muted privacy-note', 'Only you see the answer. Nothing is posted to chat.'));
+    const ask = writeButton('Ask privately', null, 'button primary'); ask.type = 'submit'; question.append(ask);
+    question.addEventListener('submit', async event => {
+      event.preventDefault(); questionText = input.value.trim();
+      if (await run(async () => { privateAnswer = demo ? { answer: findLore(questionText), message: 'Local preview only · no Twitch message sent.' } : await request('/ask', { question: questionText }); })) renderViewer();
+    });
+    if (privateAnswer) {
+      const answer = section('Just for you', '', 'private-answer'); answer.setAttribute('role', 'status'); answer.setAttribute('aria-live', 'polite');
+      if (privateAnswer.answer) {
+        const entry = privateAnswer.answer;
+        answer.append(node('h3', '', entry.term), node('p', 'detail-explanation', entry.explanation), node('p', 'muted', entry.origin));
+        for (const reference of entry.references || []) { const link = externalLink(reference.title, reference.url); if (link) answer.append(link); }
+        const clip = externalLink('Watch origin clip', entry.clipUrl, true); if (clip) answer.append(clip);
+        answer.append(node('small', 'attribution', entry.source === 'starter' ? 'Sourced starter reference · not endorsed or reviewed by this channel.' : 'From this channel’s approved lore.'));
+      } else answer.append(node('p', 'muted', 'No reviewed definition matches yet. Try a phrase below.'));
+      answer.append(node('small', 'muted', privateAnswer.message)); question.append(answer);
+    }
     const library = section('Channel lore', 'Stories reviewed by this channel’s moderators.', 'library');
     const searchLabel = node('label', 'sr-only', 'Search approved lore'); searchLabel.htmlFor = 'library-search';
     const filter = node('input'); filter.id = 'library-search'; filter.placeholder = 'Search approved stories'; filter.type = 'search'; filter.value = search;
@@ -238,8 +266,13 @@ function renderViewer() {
     content.append(question);
     if (state.nominations.length) { const ballot = section('Vote a story into the lore', 'These drafts have already been reviewed by moderators.', 'ballot'); for (const entry of state.nominations) ballot.append(loreCard(entry, true)); content.append(ballot); }
     content.append(library);
+    if (state.starterLore?.length) {
+      const references = section('Community starter references', 'Sourced definitions for this channel. These are separate from moderator-approved lore.', 'library starter-library');
+      for (const entry of state.starterLore) references.append(loreCard(entry, false));
+      content.append(references);
+    }
   }
-  if (selectedId) { const selected = [...state.lore, ...state.nominations].find(entry => entry.id === selectedId); if (selected) renderDetail(selected); }
+  if (selectedId) { const selected = [...state.lore, ...state.nominations, ...(state.starterLore || [])].find(entry => entry.id === selectedId); if (selected) renderDetail(selected); }
 }
 function loreCard(entry, nominated) {
   const item = node('article', 'lore-card');
@@ -248,7 +281,7 @@ function loreCard(entry, nominated) {
   const attribution = entry.reviewedBy || entry.author; if (attribution?.login) item.append(node('small', 'attribution', `${entry.reviewedBy ? 'Reviewed' : 'Added'} by ${attribution.displayName || attribution.login} (@${attribution.login})`));
   const bottom = node('div', 'lore-bottom'); bottom.append(button('The backstory →', () => showLore(entry), 'text-button'));
   if (nominated) bottom.append(node('span', 'vote-count', `${entry.votes}/5 votes`));
-  if (!demo && status?.canVote) bottom.append(writeButton(voted.has(entry.id) ? 'Voted ✓' : nominated ? 'Vote it in' : `↑ ${entry.votes}`, () => vote(entry), 'button secondary vote-button'));
+  if (!demo && status?.canVote && entry.source !== 'starter') bottom.append(writeButton(voted.has(entry.id) ? 'Voted ✓' : nominated ? 'Vote it in' : `↑ ${entry.votes}`, () => vote(entry), 'button secondary vote-button'));
   const voteButton = bottom.lastChild; if (voted.has(entry.id) && voteButton?.tagName === 'BUTTON') voteButton.disabled = true;
   item.append(bottom); if (!demo && !status?.canVote && nominated) { item.append(node('small', 'muted', 'Sign in to Twitch and share your identity to vote.'), shareIdentityButton()); } return item;
 }
@@ -266,7 +299,9 @@ function renderDetail(entry) {
   dialog.append(heading, node('h2', '', entry.term), node('p', 'detail-explanation', entry.explanation), node('h3', 'origin-heading', 'Where it started'), node('p', 'origin', entry.origin));
   const clip = externalLink('Watch the origin clip on Twitch', entry.clipUrl, true);
   const author = entry.reviewedBy || entry.author; if (author?.login) dialog.append(node('small', 'attribution', `${entry.reviewedBy ? 'Reviewed' : 'Added'} by ${author.displayName || author.login} (@${author.login})`));
-  dialog.append(clip || node('small', 'muted', entry.source === 'demo' ? 'Demo origin · no clip attached' : 'No origin clip attached yet'), node('p', 'reviewed', entry.status === 'nominated' ? `Mod reviewed · community vote ${entry.votes}/5` : 'Moderator approved'));
+  dialog.append(clip || node('small', 'muted', entry.source === 'demo' ? 'Demo origin · no clip attached' : 'No Twitch origin clip attached yet'));
+  for (const reference of entry.references || []) { const link = externalLink(reference.title, reference.url); if (link) dialog.append(link); }
+  dialog.append(node('p', 'reviewed', entry.source === 'starter' ? 'Sourced starter reference · not endorsed or reviewed by this channel.' : entry.status === 'nominated' ? `Mod reviewed · community vote ${entry.votes}/5` : 'Moderator approved'));
 }
 function creatorForm(id, title, description) { const form = node('form', 'creator-form'); form.id = id; form.append(node('h3', '', title)); if (description) form.append(node('p', 'muted', description)); return form; }
 function renderCreator() {
@@ -309,6 +344,8 @@ function renderConnection() {
   else details.append(node('p', 'muted', 'Account authorization is not configured on this server. Ask the developer to configure Twitch OAuth before publishing channel context.'));
   if (pendingOAuthUrl) { const link = externalLink('Continue to Twitch authorization', pendingOAuthUrl); if (link) details.append(link); }
   details.append(button('Refresh connection status', () => refresh(), 'text-button'));
+  details.append(node('p', 'muted', 'Private chat answers require user:manage:whispers and a phone-verified sender. Twitch may block delivery or limit new recipients. Ask privately in the panel always keeps the answer here.'));
+  if (canModerate()) details.append(writeButton(state.starterLoreEnabled === false ? 'Enable community starter references' : 'Hide community starter references', () => run(() => request('/mod/starter-lore', { enabled: state.starterLoreEnabled === false }), 'Starter reference setting saved.')));
   section.append(details);
 }
 function renderReviews() {
@@ -363,7 +400,7 @@ if (demo) {
     for (const request of requests) request.abort();
     requests.clear(); refreshing = false; busy = false;
     authorization = { token: auth.token, channelId: auth.channelId };
-    if (changedChannel) { state = null; status = null; moderator = null; creatorBuilt = false; selectedId = null; pendingOAuthUrl = ''; voted.clear(); document.getElementById('lore-detail').close(); document.getElementById('viewer-content').replaceChildren(); document.getElementById('creator').replaceChildren(); }
+    if (changedChannel) { state = null; status = null; moderator = null; creatorBuilt = false; selectedId = null; privateAnswer = null; questionText = ''; search = ''; pendingOAuthUrl = ''; voted.clear(); document.getElementById('lore-detail').close(); document.getElementById('viewer-content').replaceChildren(); document.getElementById('creator').replaceChildren(); }
     refresh();
   });
   helper.onContext?.(context => { if (context.theme === 'light' || context.theme === 'dark') document.documentElement.dataset.theme = context.theme; });

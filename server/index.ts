@@ -4,6 +4,7 @@ import { startTwitch } from './twitch.ts';
 import express from 'express';
 import { resolve } from 'node:path';
 import { createExtensionHost } from './extension-host.ts';
+import { communities } from './community-lore.ts';
 
 try { process.loadEnvFile(); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 const mode = process.env.STREAMLORE_MODE ?? 'demo';
@@ -25,8 +26,8 @@ const extension = createExtensionHost({
 const app = express();
 app.disable('x-powered-by'); app.use(extension.router);
 const store = mode !== 'extension' ? createStore(process.env.STREAMLORE_DB_PATH || `data/${mode}.sqlite`, mode === 'demo') : null;
-const runtime = store && mode !== 'extension' ? createApp({ store, mode, password: process.env.STREAMLORE_MOD_PASSWORD, publicUrl }) : null;
-const twitch = mode === 'live' && runtime ? startTwitch({ onChat: runtime.ingestChat, onStatus: runtime.setTwitchStatus, onChannel: runtime.setChannel, getCatchup: runtime.catchup, getLore: runtime.loreReply, voteLore: runtime.voteLore }) : null;
+const runtime = store && mode !== 'extension' ? createApp({ store, mode, password: process.env.STREAMLORE_MOD_PASSWORD, publicUrl, communityChannelId: mode === 'live' ? communities.find(community => community.login === process.env.TWITCH_CHANNEL?.replace(/^[@#]/, '').toLowerCase())?.channelId : undefined }) : null;
+const twitch = mode === 'live' && runtime ? startTwitch({ onChat: runtime.ingestChat, onStatus: runtime.setTwitchStatus, onChannel: runtime.setChannel, getCatchup: runtime.catchup, getLore: runtime.loreReply, getLoreEntry: runtime.loreAnswer, voteLore: runtime.voteLore }) : null;
 if (runtime) app.use(runtime.app);
 else {
   app.get('/', (_req, res) => res.redirect('/install'));

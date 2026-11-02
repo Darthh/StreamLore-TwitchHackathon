@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
-import type { Connection, StreamState } from '../shared/types.ts';
+import type { Connection, Lore, StreamState } from '../shared/types.ts';
+import { createLoreWhispers, loreQuestion, whisperText } from './whispers.ts';
 
 type TwitchOptions = {
   config?: { clientId: string; channelLogin: string; getAccessToken: (forceRefresh?: boolean) => Promise<string> };
@@ -7,6 +8,8 @@ type TwitchOptions = {
   onStatus: (status: Connection) => void;
   getCatchup: () => string;
   getLore: (query: string) => string;
+  getLoreEntry?: (question: string) => Lore | undefined;
+  socketFactory?: (url: string) => WebSocket;
   voteLore?: (query: string, user: string) => string;
   onChannel?: (channel: StreamState['channel']) => void;
 };
@@ -43,7 +46,7 @@ export function startTwitch(options: TwitchOptions): { close: () => void } {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let validationTimer: ReturnType<typeof setInterval> | undefined;
   let channelTimer: ReturnType<typeof setInterval> | undefined;
-  let botId = '', broadcasterId = '', broadcasterName = channelLogin!, broadcasterImage = '', attempts = 0, lastReply = 0;
+  let botId = '', broadcasterId = '', broadcasterName = channelLogin!, broadcasterImage = '', attempts = 0, lastReply = 0, whispersAllowed = false;
   const seen = new Set<string>();
   class TwitchError extends Error { code: number; constructor(code: number, message: string) { super(message); this.code = code; } }
 
@@ -95,7 +98,17 @@ export function startTwitch(options: TwitchOptions): { close: () => void } {
       throw new TwitchError(403, 'Twitch token needs user:read:chat and user:write:chat scopes.');
     }
     botId = data.user_id;
+    whispersAllowed = data.scopes.includes('user:manage:whispers');
   }
+
+  const answerPrivately = createLoreWhispers({
+    answer: question => options.getLoreEntry?.(question),
+    send: async (recipientId, entry) => {
+      await request(`https://api.twitch.tv/helix/whispers?${new URLSearchParams({ from_user_id: botId, to_user_id: recipientId })}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: whisperText(entry, broadcasterName) }),
+      });
+    },
+  });
 
   async function refreshChannel() {
     const [streams, channels] = await Promise.all([
@@ -116,7 +129,7 @@ export function startTwitch(options: TwitchOptions): { close: () => void } {
 
   function connect(url = 'wss://eventsub.wss.twitch.tv/ws', previous: WebSocket | null = null) {
     if (stopped) return;
-    const current = new WebSocket(url);
+    const current = options.socketFactory ? options.socketFactory(url) : new WebSocket(url);
     sockets.add(current);
     if (!previous) socket = current;
     let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -147,7 +160,7 @@ export function startTwitch(options: TwitchOptions): { close: () => void } {
           socket = current; attempts = 0;
           clearTimeout(retry); retry = undefined;
           if (previous) previous.close();
-          status(true, `Connected to ${broadcasterName} chat. !catchup and !lore are ready.`);
+          status(true, `Connected to ${broadcasterName} chat. ${whispersAllowed ? 'Private lore Whispers enabled; delivery is controlled by Twitch.' : 'Reconnect and allow Whispers for private chat answers. Panel answers remain available.'}`);
         } else if (type === 'session_reconnect') {
           const reconnectUrl = message.payload?.session?.reconnect_url;
           if (typeof reconnectUrl === 'string' && new URL(reconnectUrl).hostname === 'eventsub.wss.twitch.tv' && reconnectUrl.startsWith('wss://')) connect(reconnectUrl, current);
@@ -164,6 +177,14 @@ export function startTwitch(options: TwitchOptions): { close: () => void } {
           if (event.source_broadcaster_user_id && event.source_broadcaster_user_id !== broadcasterId) return;
           const text = event.message.text.slice(0, 500);
           const command = parseCommand(text);
+          // Questions are answered privately and never fall through to a public reply.
+          if (loreQuestion(text)) {
+            if (event.chatter_user_id !== botId && whispersAllowed) {
+              try { await answerPrivately(text, String(event.chatter_user_id || ''), botId); }
+              catch { status(true, 'Reading chat; Twitch could not accept a private lore Whisper. Use Ask privately in the panel. Check Whisper permissions, phone verification, recipient settings, and limits.'); }
+            }
+            return;
+          }
           if (event.chatter_user_id !== botId) options.onChat(String(event.chatter_user_name || event.chatter_user_login || 'Viewer').slice(0, 80), text);
           // Count every viewer's vote; only the outgoing acknowledgement is throttled.
           const voteReply = command?.name === 'lorevote'

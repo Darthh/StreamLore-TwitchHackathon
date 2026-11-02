@@ -7,6 +7,7 @@ export type Snapshot = {
   loreDropId: string | null; scenarioStep: number; captions: string;
   chat: { user: string; text: string; at: string }[];
   extensionConfigured?: boolean;
+  starterLoreEnabled?: boolean;
 };
 
 export function createSeed(demo: boolean, now = Date.now()): Snapshot {

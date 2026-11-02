@@ -4,9 +4,10 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Connection, ContentAuthor, Lore, LoreCategory, StreamState } from '../shared/types.ts';
 import type { Store } from './store.ts';
-import { advanceDemo } from './seed.ts';
+import { advanceDemo, createSeed } from './seed.ts';
 import { aiConfigured, draftLore, summarizeStream } from './ai.ts';
 import { answerLoreQuestion } from '../shared/lore.ts';
+import { communities, starterLore } from './community-lore.ts';
 
 const categories: LoreCategory[] = ['Inside joke', 'Tradition', 'Character', 'Moment'];
 class HttpError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
@@ -52,11 +53,12 @@ function cookies(req: Request): Record<string, string> {
 function local(req: Request) { return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? ''); }
 const digest = (value: string) => createHash('sha256').update(value).digest();
 
-export function createApp({ store, mode = 'demo', password = '', publicUrl = 'http://localhost:5173', authorizeModerator, trustedRequest, voterIdentity, contentAuthor, extensionManaged = false, staticFiles = true }: {
+export function createApp({ store, mode = 'demo', password = '', publicUrl = 'http://localhost:5173', authorizeModerator, trustedRequest, voterIdentity, contentAuthor, extensionManaged = false, staticFiles = true, communityChannelId = '' }: {
   store: Store; mode?: 'demo' | 'live'; password?: string; publicUrl?: string;
   authorizeModerator?: (req: Request) => boolean; trustedRequest?: (req: Request) => boolean;
   voterIdentity?: (req: Request) => string | undefined; contentAuthor?: (req: Request) => ContentAuthor | undefined;
   extensionManaged?: boolean; staticFiles?: boolean;
+  communityChannelId?: string;
 }) {
   const demo = mode === 'demo';
   if (!demo && !authorizeModerator && password.length < 12) throw new Error('Set STREAMLORE_MOD_PASSWORD to at least 12 characters before starting live mode.');
@@ -88,7 +90,7 @@ export function createApp({ store, mode = 'demo', password = '', publicUrl = 'ht
     const data = store.read();
     const approved = data.lore.filter(entry => entry.status === 'approved');
     return {
-      mode, channel: data.channel, stream: data.stream, moments: data.moments, lore: approved,
+      mode, channel: data.channel, stream: data.stream, moments: data.moments, lore: approved, starterLore: references(), starterLoreEnabled: data.starterLoreEnabled !== false,
       nominations: data.lore.filter(entry => entry.status === 'nominated'),
       loreDrop: approved.find(entry => entry.id === data.loreDropId) ?? null,
       stats: { moments: data.moments.length, lore: approved.length, pending: data.lore.filter(entry => entry.status === 'pending').length },
@@ -128,6 +130,12 @@ export function createApp({ store, mode = 'demo', password = '', publicUrl = 'ht
   });
   app.get('/api/health', (_req, res) => res.json({ ok: true, mode }));
   app.get('/api/state', (_req, res) => res.json(state()));
+  if (demo) app.get('/api/community/:login/preview', (req, res) => {
+    if (!local(req)) throw new HttpError(403, 'Community previews are local-only.');
+    const community = communities.find(item => item.login === req.params.login);
+    if (!community) throw new HttpError(404, 'This community has no bundled starter references.');
+    res.json({ ...state(), channel: { ...createSeed(false).channel, login: community.login, displayName: community.displayName, title: 'Starter reference preview · no live Twitch connection' }, stream: { objective: 'Ask about this community’s phrases.', summary: [], updatedAt: new Date().toISOString() }, moments: [], lore: [], starterLore: starterLore(community.channelId), nominations: [], loreDrop: null, stats: { moments: 0, lore: 0, pending: 0 } });
+  });
   app.get('/api/auth/session', (req, res) => res.json({ authenticated: authenticated(req), demoAccess: demo && local(req), ...(extensionManaged ? { extensionManaged: true } : {}) }));
   app.post('/api/auth/login', (req, res) => {
     rateLimit(req, 'login', 8, 15 * 60_000);
@@ -163,10 +171,18 @@ export function createApp({ store, mode = 'demo', password = '', publicUrl = 'ht
   }
   function loreReply(query: string) {
     if (!query.trim()) return `Explore the channel’s lore: ${store.read().lore.filter(item => item.status === 'approved').slice(0, 3).map(item => item.term).join(', ') || 'No approved entries yet'}. Try !lore <term> · ${publicUrl}?view=lore`;
-    const item = answerLoreQuestion(store.read().lore, query) ?? findLore(query);
+    const item = loreAnswer(query) ?? findLore(query);
     if (!item) return `No approved lore found for “${query.slice(0, 60)}”. Explore ${publicUrl}?view=lore`;
-    return `${item.term}: ${item.explanation} ${item.clipUrl || `${publicUrl}?lore=${encodeURIComponent(item.id)}`}`;
+    return `${item.term}: ${item.explanation} ${item.clipUrl || item.references?.[0]?.url || `${publicUrl}?lore=${encodeURIComponent(item.id)}`}`;
   }
+  function references() { return store.read().starterLoreEnabled === false ? [] : starterLore(communityChannelId); }
+  function loreAnswer(question: string) { return answerLoreQuestion(store.read().lore, question) ?? answerLoreQuestion(references(), question); }
+  app.post('/api/ask', (req, res) => {
+    rateLimit(req, 'questions', 30, 60_000);
+    const question = text(req.body.question, 'Question', 300);
+    const answer = loreAnswer(question);
+    res.json({ answer: answer || null, private: true, message: answer ? 'Only you can see this answer. Nothing was posted to chat.' : 'No reviewed channel lore or starter reference matches yet. Try a known phrase.' });
+  });
   app.get('/api/catchup', (_req, res) => res.json({ text: catchup(), summary: store.read().stream.summary }));
   app.post('/api/lore/:id/vote', (req, res) => {
     const stored = cookies(req).streamlore_voter;
@@ -183,6 +199,10 @@ export function createApp({ store, mode = 'demo', password = '', publicUrl = 'ht
     broadcast(); res.json(result.entry);
   });
   app.use(['/api/mod', '/api/demo'], (req, res, next) => authenticated(req) ? next() : res.status(401).json({ error: 'Sign in as a moderator to make changes.' }));
+  app.post('/api/mod/starter-lore', (req, res) => {
+    if (typeof req.body.enabled !== 'boolean') throw new HttpError(400, 'Choose whether starter references are enabled.');
+    store.update(data => { data.starterLoreEnabled = req.body.enabled; }); broadcast(); res.json({ enabled: req.body.enabled });
+  });
   app.get('/api/mod/state', (_req, res) => {
     const data = store.read();
     res.json({ pending: data.lore.filter(item => item.status === 'pending'), rejected: data.lore.filter(item => item.status === 'rejected'), captions: data.captions, chat: data.chat.slice(-100) });
@@ -312,7 +332,7 @@ export function createApp({ store, mode = 'demo', password = '', publicUrl = 'ht
   let spikeAt = 0;
   let lastDropAt = 0;
   return {
-    app, state, catchup, loreReply, notify: broadcast,
+    app, state, catchup, loreReply, loreAnswer, notify: broadcast,
     setTwitchStatus(status: Connection) { twitch = status; broadcast(); },
     setChannel(channel: StreamState['channel']) {
       store.update(data => {

@@ -50,14 +50,14 @@ async function fixture(t: TestContext, override?: Provider) {
   return { oauth, options, calls, connected, disconnected, callback, connect, state, setProvider(next: Provider) { provider = next; } };
 }
 
-test('OAuth start uses a random state bound to a numeric channel and only the two chat scopes', async t => {
+test('OAuth start binds state to the channel and requests chat plus private Whisper permission', async t => {
   const f = await fixture(t);
   const first = new URL(f.oauth.begin('12345')), second = new URL(f.oauth.begin('12345'));
   assert.equal(first.origin + first.pathname, 'https://id.twitch.tv/oauth2/authorize');
   assert.equal(first.searchParams.get('response_type'), 'code');
   assert.equal(first.searchParams.get('force_verify'), 'true');
   assert.equal(first.searchParams.get('redirect_uri'), f.options.redirectUri);
-  assert.equal(first.searchParams.get('scope'), 'user:read:chat user:write:chat');
+  assert.equal(first.searchParams.get('scope'), 'user:read:chat user:write:chat user:manage:whispers');
   assert.ok(first.searchParams.get('state')!.length >= 40);
   assert.notEqual(first.searchParams.get('state'), second.searchParams.get('state'));
   assert.throws(() => f.oauth.begin('../other-channel'), /valid Twitch channel/);

@@ -1,0 +1,41 @@
+import type { Lore } from '../shared/types.ts';
+
+export function loreQuestion(message: string): string | null {
+  const command = message.trim().match(/^!lore\s+(.{1,200})$/i);
+  if (command) return command[1].trim();
+  const question = message.trim();
+  return question.length <= 300 && /^(?:what(?:['’]s| is| are| does)|who(?:['’]s| is| are)|why (?:is|does|do|are))\s+.+/i.test(question) ? question : null;
+}
+
+export function whisperText(entry: Lore, channelName: string): string {
+  const sourceLink = entry.clipUrl || entry.references?.[0]?.url || '';
+  const link = sourceLink.length <= 200 ? sourceLink : '';
+  const source = entry.source === 'starter' ? 'Starter reference' : 'Channel lore';
+  const prefix = `StreamLore · ${channelName} · ${source}\n${entry.term}: `;
+  const suffix = link ? ` ${link}` : '';
+  const explanation = entry.explanation.replace(/\s+/g, ' ').trim();
+  const available = Math.max(0, 500 - prefix.length - suffix.length);
+  return `${prefix}${explanation.length > available ? `${explanation.slice(0, Math.max(0, available - 1))}…` : explanation}${suffix}`.slice(0, 500);
+}
+
+export function createLoreWhispers({ answer, send, now = Date.now }: {
+  answer: (question: string) => Lore | undefined;
+  send: (recipientId: string, entry: Lore) => Promise<void>;
+  now?: () => number;
+}) {
+  let day = '', lastSend = -Infinity;
+  const recipients = new Map<string, number>();
+  return async (message: string, recipientId: string, senderId: string): Promise<boolean> => {
+    const question = loreQuestion(message);
+    if (!question || !/^[1-9]\d{0,24}$/.test(recipientId) || recipientId === senderId) return false;
+    const entry = answer(question);
+    if (!entry) return false;
+    const time = now(), currentDay = new Date(time).toISOString().slice(0, 10);
+    if (day !== currentDay) { day = currentDay; recipients.clear(); }
+    // Twitch also enforces its own limits; reserve before awaiting concurrent sends.
+    if (time - lastSend < 1000 || time - (recipients.get(recipientId) ?? -Infinity) < 15_000 || (!recipients.has(recipientId) && recipients.size >= 40)) return false;
+    lastSend = time; recipients.set(recipientId, time);
+    await send(recipientId, entry);
+    return true;
+  };
+}

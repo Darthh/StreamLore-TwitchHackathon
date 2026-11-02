@@ -93,6 +93,25 @@ test('unconfigured native host reports missing setup without pretending to be re
   assert.deepEqual(f.providerCalls, []);
 });
 
+test('private native questions use the signed channel, work for anonymous readers, and never leak into public state', async t => {
+  const f = await fixture(t);
+  const xqc = token({ channelId: '71092938', opaqueUserId: 'Aanonymous' });
+  const caedrel = token({ channelId: '92038375' });
+  assert.equal((await f.call('/api/extension/ask', { method: 'POST', body: { question: 'What is Sally?' } })).status, 401);
+  const result = await f.call('/api/extension/ask', { method: 'POST', jwt: xqc, body: { question: 'What is a juicer?', channelId: '92038375', login: 'caedrel' } });
+  assert.equal(result.status, 200); assert.equal(result.data.answer.term, 'Juicer'); assert.equal(result.data.private, true);
+  assert.equal(result.data.answer.source, 'starter');
+  const own = await f.call('/api/extension/ask', { method: 'POST', jwt: caedrel, body: { question: 'What is Sally?' } });
+  assert.equal(own.data.answer.term, 'Sally');
+  assert.equal((await f.call('/api/extension/ask', { method: 'POST', jwt: caedrel, body: { question: 'What is a juicer?' } })).data.answer, null);
+  const publicState = await f.call('/api/extension/state', { jwt: caedrel });
+  assert.equal(publicState.data.channel.login, 'caedrel'); assert.equal(publicState.data.lore.length, 0); assert.equal(publicState.data.starterLore.length, 1);
+  assert.ok(!JSON.stringify(publicState.data).includes('What is Sally?'));
+  assert.deepEqual(f.providerCalls, []);
+  assert.equal((await f.call('/api/extension/mod/starter-lore', { method: 'POST', jwt: caedrel, body: { enabled: false } })).status, 403);
+  assert.equal((await f.call('/api/extension/ask', { method: 'POST', jwt: caedrel, body: { question: 'x'.repeat(301) } })).status, 400);
+});
+
 test('native authentication and exact origin boundaries reject unsigned, tampered, and cross-site requests', async t => {
   const f = await fixture(t);
   assert.equal((await f.call('/api/extension/state')).status, 401);

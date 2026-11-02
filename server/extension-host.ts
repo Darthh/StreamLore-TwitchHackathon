@@ -7,6 +7,7 @@ import { createApp } from './app.ts';
 import { createTwitchOAuth, type TwitchAccount } from './oauth.ts';
 import { getExtensionIdentity, ExtensionAuthError, type ExtensionIdentity } from './extension-auth.ts';
 import { startTwitch } from './twitch.ts';
+import { communities } from './community-lore.ts';
 
 type Options = {
   clientId?: string; secret?: string; publicUrl: string; dataDirectory?: string;
@@ -61,7 +62,7 @@ export function createExtensionHost(options: Options) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const store = createStore(filename, false);
     const runtime = createApp({
-      store, mode: 'live', publicUrl: `${publicUrl.origin}/channels/${id}`, staticFiles: false, extensionManaged: true,
+      store, mode: 'live', publicUrl: `${publicUrl.origin}/channels/${id}`, staticFiles: false, extensionManaged: true, communityChannelId: id,
       authorizeModerator: req => { const identity = identities.get(req); return identity?.channelId === id && Boolean(identity.userId) && ['broadcaster', 'moderator'].includes(identity.role); },
       trustedRequest: req => identities.get(req)?.channelId === id,
       voterIdentity: req => { const identity = identities.get(req); return identity?.channelId === id && identity.opaqueUserId.startsWith('U') ? `extension:${identity.opaqueUserId}` : undefined; },
@@ -69,6 +70,8 @@ export function createExtensionHost(options: Options) {
     });
     const created = { store, runtime };
     channels.set(id, created);
+    const community = communities.find(item => item.channelId === id);
+    if (community && !store.read().channel.login) runtime.setChannel({ ...store.read().channel, login: community.login, displayName: community.displayName });
     const account = oauth?.account(id);
     if (account) runtime.setChannel({ ...store.read().channel, login: account.login, displayName: account.displayName, profileImageUrl: account.profileImageUrl });
     return created;
@@ -80,7 +83,7 @@ export function createExtensionHost(options: Options) {
     entry.chat = (options.chatFactory || startTwitch)({
       config: { clientId: options.oauth!.clientId, channelLogin: account.login, getAccessToken: force => oauth!.getAccessToken(account.channelId, force) },
       onChat: entry.runtime.ingestChat, onStatus: entry.runtime.setTwitchStatus, onChannel: entry.runtime.setChannel,
-      getCatchup: entry.runtime.catchup, getLore: entry.runtime.loreReply, voteLore: entry.runtime.voteLore,
+      getCatchup: entry.runtime.catchup, getLore: entry.runtime.loreReply, getLoreEntry: entry.runtime.loreAnswer, voteLore: entry.runtime.voteLore,
     });
   }
   function disconnect(id: string) {
@@ -185,8 +188,9 @@ export function createExtensionHost(options: Options) {
       const route = req.path;
       const publicRead = req.method === 'GET' && ['/state', '/catchup'].includes(route);
       const vote = req.method === 'POST' && /^\/lore\/[^/]+\/vote$/.test(route);
+      const question = req.method === 'POST' && route === '/ask';
       const modRoute = /^\/mod\//.test(route);
-      if (!publicRead && !vote && !modRoute) throw new HostError(404, 'Extension route not found.');
+      if (!publicRead && !vote && !modRoute && !question) throw new HostError(404, 'Extension route not found.');
       if (vote && !identity.opaqueUserId.startsWith('U')) throw new HostError(403, 'Log in to Twitch to vote. Anonymous sessions are never stored.');
       if (modRoute && (!creatorRole || !identityLinked)) throw new HostError(403, 'Share your Twitch identity as the broadcaster or a moderator to edit this channel.');
       if (modRoute && req.method !== 'GET') {

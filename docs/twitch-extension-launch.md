@@ -20,6 +20,14 @@ The supplied StreamLore logo is preserved in [`assets/streamlore-logo.png`](asse
 
 Upload the listing assets and provide actual author/support contacts and public legal URLs before review. Twitch currently flags the missing Privacy Notice for the mobile-enabled version.
 
+## Private phrase answers
+
+The native panel opens on **Ask privately**. Signed viewer requests use `/api/extension/ask`; the JWT selects the channel. This returns a private panel answer without storing the question in stream history. The two sourced starter definitions are xQc’s **Juicer/Juicers** and Caedrel’s **Sally**. They are separate from moderator-approved lore, and creators can hide them.
+
+To answer questions typed in chat, reconnect the broadcaster account and allow **`user:manage:whispers`** alongside **`user:read:chat`** and **`user:write:chat`**. The sender needs a verified phone number. Test from a different viewer account, with recipient settings permitting Whispers. Ask “What is Sally?” on the corresponding configured channel, then verify the private message arrives; a successful API response alone cannot establish delivery. Test unknown terms and blocked Whispers, ensuring no answer appears publicly and chat stays connected. Twitch limits new recipients and can silently drop Whispers; use the private panel when delivery fails. [Official Whisper limitations](https://dev.twitch.tv/docs/chat/whispers/)
+
+Existing chat-only grants remain usable but cannot send Whispers until reauthorized. StreamLore must be installed and the broadcaster connected on each channel; a dataset entry does not grant access to that channel. Local previews at `/extension/panel.html?demo=1&community=xqc` and `?demo=1&community=caedrel` send no Twitch messages. The updated package and provider behavior have local coverage; live deployment, OAuth consent, and Whisper receipt still require verification.
+
 ## Launch process
 
 **Account prerequisite:** Enable two-factor authentication on the Twitch developer account in [Security settings](https://www.twitch.tv/settings/security). Twitch blocks Extension creation until 2FA is enabled. Complete that account-security step yourself; never put verification or recovery codes in project files or chat.
@@ -67,6 +75,6 @@ Upload the listing assets and provide actual author/support contacts and public 
 
 **Summary:** Catch up on stream moments and discover the stories behind your channel's inside jokes.
 
-**Description:** StreamLore welcomes new viewers with a short catch-up recap, a timeline of important stream moments, and a searchable library of channel lore. Creators record objectives and moments, add origin clips, and review lore before it appears publicly. Moderator-reviewed nominations can join the library through community voting. Optional AI drafts use creator-provided captions, clip transcripts, and chat context; drafts require moderator approval. The connected broadcaster account replies to `!catchup`, `!lore`, and `!lorevote` in chat. Broadcasters configure StreamLore and activate it as a channel panel. Viewers can read without sharing their numeric identity; creator editing requires Twitch-verified attribution.
+**Description:** StreamLore welcomes new viewers with a stream recap and explanations of community phrases. Ask privately in the panel for moderator-approved lore or clearly labeled, sourced starter references. Creators record objectives and moments, attach origin clips, and review lore before publishing. Reviewed nominations can enter the library through community voting. Optional AI drafts use supplied captions and clip transcripts and require moderator review. A connected broadcaster account can send private Twitch Whispers in response to known chat questions or !lore requests; delivery depends on Twitch permissions, privacy settings, and limits. !catchup and !lorevote connect viewers to the current stream and community ballot. Broadcasters configure and activate StreamLore as a channel panel.
 
 Before submitting, supply your actual support contact, operator identity, public backend domain, Privacy Policy URL, and Terms/EULA URL. Use screenshots from the native `panel.html` view, rather than the companion website. These are operator-supplied listing details, not values the application can infer.
