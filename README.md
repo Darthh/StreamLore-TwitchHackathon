@@ -18,7 +18,10 @@ Built for the **[Codex × TwitchCon Hackathon](https://twitchcon-codex.devpost.c
 
 **Status: Twitch Hosted Test, active on TheDarthh’s channel.** The uploaded panel runs from Twitch’s CDN and its private question flow has been exercised inside Twitch. The Cloudflare backend has the genuine Extension shared secret. TheDarthh’s broadcaster account is authorized and its Twitch chat webhook is connected. Real Whisper receipt from a different viewer, review materials, Twitch review, and release remain required before public installation.
 
+**For viewers:** turn StreamLore on at [`/everywhere`](https://streamlore.patrickvaldivia123.workers.dev/everywhere) or install the [`/viewer`](https://streamlore.patrickvaldivia123.workers.dev/viewer) browser add-on. Then type “whats a juicer” in xQc’s chat and **streamlore26** whispers you what it means. No streamer installation is needed. Real Whisper delivery is still being verified.
+
 <p align="center">
+  <a href="https://streamlore.patrickvaldivia123.workers.dev/everywhere">Turn on StreamLore</a> ·
   <a href="#getting-started">Run the demo</a> ·
   <a href="#add-to-a-twitch-channel">Add to Twitch</a> ·
   <a href="docs/twitch-extension-launch.md">Launch guide</a> ·
@@ -81,6 +84,29 @@ Current-stream context resets for a new broadcast. Channel lore stays with the c
 These are implemented code paths. External credentials, public hosting, and Twitch approval determine which paths can run outside the local demo.
 
 ## See it in action
+
+### The StreamLore site
+
+<p align="center">
+  <a href="https://streamlore.patrickvaldivia123.workers.dev/everywhere"><img src="docs/assets/streamlore-site-everywhere.png" alt="StreamLore's /everywhere page: turn StreamLore on once and streamlore26 whispers you what chat slang means, with Connect streamlore26 first and Turn on with Twitch buttons" width="1000"></a>
+</p>
+
+<p align="center"><em><a href="https://streamlore.patrickvaldivia123.workers.dev/everywhere"><code>/everywhere</code></a> — viewers turn StreamLore on once; slang questions they ask in any live followed channel are answered by Whisper.</em></p>
+
+<table>
+  <tr>
+    <td width="50%"><a href="https://streamlore.patrickvaldivia123.workers.dev/viewer"><img src="docs/assets/streamlore-site-viewer.png" alt="StreamLore's /viewer page for the personal browser add-on, with xQc and Caedrel examples and setup steps"></a></td>
+    <td width="50%"><a href="https://streamlore.patrickvaldivia123.workers.dev/install"><img src="docs/assets/streamlore-site-install.png" alt="StreamLore's /install page for adding the native Twitch panel to a channel"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><em><a href="https://streamlore.patrickvaldivia123.workers.dev/viewer"><code>/viewer</code></a> — the personal browser add-on.</em></td>
+    <td align="center"><em><a href="https://streamlore.patrickvaldivia123.workers.dev/install"><code>/install</code></a> — the native Twitch panel for streamers.</em></td>
+  </tr>
+</table>
+
+<p align="center"><em>Screenshots of the deployed pages, rendered locally before the Whisper account was connected.</em></p>
+
+### The companion app
 
 <p align="center">
   <img src="docs/assets/streamlore-companion.png" alt="StreamLore companion showing TheDarthh's demo profile, a catch-up recap, current objective, and channel lore" width="1000">
