@@ -16,7 +16,7 @@
 
 Built for the **[Codex × TwitchCon Hackathon](https://twitchcon-codex.devpost.com/)**. StreamLore gives streamers fewer repeated explanations and gives new viewers a way into the conversation: a recap of the current stream and a lasting library of channel lore.
 
-**Status: working local prototype; native Twitch Extension is registered and prerelease.** The companion app, panel/mobile views, creator controls, authentication, and upload builder are implemented. A Cloudflare Workers backend has been deployed; genuine Twitch credentials, connected testing, Hosted Test, review, and release are still required before ordinary streamers can install it. Local tests do not establish a live Twitch installation.
+**Status: Twitch Hosted Test, active on TheDarthh’s channel.** The uploaded panel runs from Twitch’s CDN and its private question flow has been exercised inside Twitch. The Cloudflare backend has the genuine Extension shared secret. TheDarthh’s broadcaster account is authorized and its Twitch chat webhook is connected. Real Whisper receipt from a different viewer, review materials, Twitch review, and release remain required before public installation.
 
 <p align="center">
   <a href="#getting-started">Run the demo</a> ·
@@ -156,14 +156,14 @@ The repository includes all four native views:
 | Configuration | [`extension/config.html`](extension/config.html) | Connect the broadcaster account and set up channel context. |
 | Live Config | [`extension/live.html`](extension/live.html) | Manage moments, review lore, and control the overlay. |
 
-**Public installation is not enabled yet.** The Extension is registered in Twitch's Developer Console. Configure the genuine Twitch credentials on the deployed Worker, set up the separate OAuth application, test through Twitch, and complete review and release. The [launch guide](docs/twitch-extension-launch.md) includes exact paths, environment variables, allowlists, listing copy, and release steps.
+**Public installation is not enabled yet.** Version 0.1.0 is uploaded to Twitch Hosted Test and active in Panel 2 on TheDarthh. The genuine Extension shared secret is installed on the Worker. The separate StreamLore Chat OAuth app is configured, TheDarthh is authorized, and the chat webhook is connected. Finish real viewer/Whisper testing, review, and release. The [launch guide](docs/twitch-extension-launch.md) includes exact paths, environment variables, allowlists, listing copy, and release steps.
 
 | Registration detail | Value |
 | --- | --- |
 | Registered name | **StreamLore Companion**; the application branding remains **StreamLore**. |
 | Public Extension client ID | `m7tirdtzbocxkfacsis37lvc81i4uc` |
 | Version and views | `0.1.0`, with Panel and Mobile support. |
-| Twitch lifecycle state | **Local Test**; this state does not establish a completed live test. |
+| Twitch lifecycle state | **Hosted Test**; installed and active in Panel 2 on TheDarthh. |
 | Developer Console | [Version 0.1.0 status](https://dev.twitch.tv/console/extensions/m7tirdtzbocxkfacsis37lvc81i4uc/0.1.0/status) — developer access required. |
 
 Registration does not mean Twitch has approved or released the Extension.
@@ -403,11 +403,11 @@ npm run build
 
 The local suite covers review visibility, authentication, forged/expired JWTs, channel isolation, OAuth identity binding, encrypted credentials, refresh rotation, voting, creator attribution, content removal, private phrase answers, Whisper limits and transport, chat replies, AI failure handling, and ZIP contents. The build includes TypeScript checking. Provider calls are mocked; a passing suite does not establish live Whisper delivery.
 
-Additional local checks exercised production-mode HTTP routes and browser previews at desktop, phone, and the native panel's 320px width. Provider integration tests use mocks. These results do not establish public hosting, Docker runtime behavior, live OAuth consent, native Twitch installation, or review approval.
+Additional local checks exercised production-mode HTTP routes and browser previews at desktop, phone, and the native panel's 320px width. Provider integration tests use mocks. Separately, Twitch Hosted Test is installed and active on TheDarthh, the panel’s private no-match response was checked inside Twitch, broadcaster OAuth completed, and chat webhook connection is reported. Docker behavior, real viewer-to-Whisper delivery, and review approval remain unverified.
 
 ## Deployment and persistence
 
-The [Cloudflare Workers setup](docs/cloudflare-setup.md) targets **https://streamlore.patrickvaldivia123.workers.dev** with persistent channel Durable Objects and signed Twitch webhooks. Cloudflare confirms the deployment is active; this campus network blocks workers.dev, so public reachability and live Twitch delivery have not been verified here. Runtime encryption/EventSub secrets are installed; genuine Twitch credentials remain required.
+The [Cloudflare Workers setup](docs/cloudflare-setup.md) targets **https://streamlore.patrickvaldivia123.workers.dev** with persistent channel Durable Objects and signed Twitch webhooks. Cloudflare confirms the deployment is active. Command-line HTTPS requests to workers.dev are reset on this network; the browser loads the Twitch-hosted panel and receives private answers from the Worker. All required Twitch/runtime credentials are installed, and TheDarthh’s broadcaster authorization and chat webhook are connected. Real Whisper receipt remains outstanding.
 
 For the alternative Node/Docker host, use an always-running Node process behind public HTTPS. Its chat connections and SQLite files require persistent process/storage.
 
@@ -477,7 +477,7 @@ Generated directories, credentials, local evidence, and database files are ignor
 
 ## Current limitations
 
-- **Prerelease Extension:** registration and Worker deployment are complete; genuine Twitch credentials, connected testing, Hosted Test, review, and release remain outstanding.
+- **Prerelease Extension:** Hosted Test is active on TheDarthh with broadcaster OAuth and the chat webhook connected; real Whisper receipt, review, and release remain outstanding.
 - **Supplied evidence:** audio capture, video fetching, and transcription are not implemented.
 - **Human review matters:** a model can misread a joke. Lore drafts require creator review, and unsupported history should stay unknown.
 - **Prototype hosting:** Node uses SQLite files and a bounded in-process channel registry; Workers use per-channel durable SQLite. Production load and recovery need further validation.

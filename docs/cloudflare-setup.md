@@ -4,7 +4,7 @@ Deployment target: **https://streamlore.patrickvaldivia123.workers.dev**.
 
 The backend runs as a Worker with a SQLite-backed Durable Object for each channel. Twitch chat arrives through signed EventSub webhooks. The deployment does not depend on this Mac, a Cloudflare Tunnel, local SQLite files, or a permanently open WebSocket.
 
-Cloudflare has accepted the deployment. The campus network currently blocks `workers.dev`, including previously deployed Workers, so public URL reachability and live Twitch receipt have not been verified from this network. Local Worker integration checks passed. Twitch credentials and account authorization are still required.
+Cloudflare has accepted the deployment. Command-line HTTPS requests to `workers.dev` are reset on this network. The browser successfully loads the Twitch-hosted panel and receives private question responses from the configured Worker. Local Worker integration checks passed. The separate OAuth app’s credentials were validated with Twitch, TheDarthh completed consent, and the configuration reports chat webhook connection. Real Whisper receipt from a different viewer still requires verification.
 
 ## Build and deploy
 
@@ -32,7 +32,7 @@ Set secrets with `npx wrangler secret put NAME`, or a private JSON file passed t
 | `TWITCH_EVENTSUB_SECRET` | Random webhook signing secret, at least 32 characters. |
 | `OPENAI_API_KEY` | Optional model-assisted summaries and private lore drafts. |
 
-The encryption key and EventSub verification secret have been generated locally and installed in Cloudflare. The genuine Extension shared secret and separate Twitch OAuth app credentials remain outstanding. Changing the encryption key breaks access to existing stored credentials; changing the EventSub secret requires recreating subscriptions.
+The encryption key, EventSub verification secret, and the existing Extension’s genuine shared secret are installed in Cloudflare. The genuine StreamLore Chat OAuth client ID and secret are also installed. TheDarthh completed broadcaster consent and the native configuration reports the chat webhook connected. Changing the encryption key breaks access to existing stored credentials; changing the EventSub secret requires recreating subscriptions.
 
 ## Twitch console configuration
 
@@ -40,7 +40,7 @@ The encryption key and EventSub verification secret have been generated locally 
 2. Set **Testing Base URI** to `https://streamlore.patrickvaldivia123.workers.dev/extension/`. Keep `panel.html`, `mobile.html`, `config.html`, and `live.html` as relative paths.
 3. Add `https://streamlore.patrickvaldivia123.workers.dev` to the fetching allowlist. Permit configuration/OAuth destinations and external source links as required by Twitch.
 4. Register the separate confidential OAuth app with callback **`https://streamlore.patrickvaldivia123.workers.dev/auth/twitch/callback`**. Install its credentials as Worker secrets.
-5. Install the Local Test Extension on an allowed test channel. Connect the broadcaster account through configuration.
+5. The eight-file ZIP is already uploaded to Hosted Test, installed, and active in Panel 2 on TheDarthh. TheDarthh’s broadcaster account is connected through configuration.
 6. Worker connections request `user:read:chat`, `user:write:chat`, `user:manage:whispers`, `user:bot`, and `channel:bot`. The additional bot permissions allow app-token EventSub webhook subscriptions. Reconnect old chat-only grants.
 7. Test as a different viewer. Check private panel answers separately from receipt of real Twitch Whispers. Review/release are still required for public installation.
 
@@ -56,6 +56,6 @@ Panel questions are answered directly and are not added to shared channel state.
 
 ## Operating limits
 
-This is a prototype, not a load-tested service for a high-volume channel. Every subscribed chat message invokes the Worker, so Cloudflare request/CPU/storage quotas matter. Do not enable a paid plan automatically. The native panel can continue answering from approved/reference definitions without a connected chat account, once the genuine Extension secret is configured. Twitch review materials, support/legal URLs, actual installation, OAuth consent, and real Whisper delivery remain operator verification steps.
+This is a prototype, not a load-tested service for a high-volume channel. Every subscribed chat message invokes the Worker, so Cloudflare request/CPU/storage quotas matter. Do not enable a paid plan automatically. The native panel can continue answering from approved/reference definitions without a connected chat account, using the configured genuine Extension secret. Twitch review materials, support/legal URLs, and real Whisper receipt remain outstanding. Installation and broadcaster consent have been exercised on TheDarthh.
 
 The local Node/Docker backend is still available as a separate deployment option. Earlier Quick Tunnel instructions are superseded by this Workers setup.
