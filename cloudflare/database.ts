@@ -2,19 +2,22 @@ import type { SqlDatabase } from '../server/sql-database.ts';
 import type { DurableObjectStorage } from '@cloudflare/workers-types';
 
 export function durableDatabase(storage: DurableObjectStorage): SqlDatabase {
+  let closed = false;
+  const assertOpen = () => { if (closed) throw new Error('This channel database handle is closed.'); };
   const binding = (value: any) => ArrayBuffer.isView(value) ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) : value;
   return {
-    exec(sql) { return storage.sql.exec(sql.replace(/PRAGMA[^;]*;/gi, '')); },
+    exec(sql) { assertOpen(); return storage.sql.exec(sql.replace(/PRAGMA[^;]*;/gi, '')); },
     prepare(sql) {
-      const query = (values: any[]) => storage.sql.exec(sql, ...values.map(binding));
+      assertOpen();
+      const query = (values: any[]) => { assertOpen(); return storage.sql.exec(sql, ...values.map(binding)); };
       return {
         get: (...values) => query(values).toArray()[0],
         all: (...values) => query(values).toArray(),
         run: (...values) => { query(values); return { changes: Number(storage.sql.exec('SELECT changes() AS changes').one().changes) }; },
       };
     },
-    transaction: work => storage.transactionSync(work),
-    close() {},
+    transaction: work => { assertOpen(); return storage.transactionSync(work); },
+    close() { closed = true; },
   };
 }
 

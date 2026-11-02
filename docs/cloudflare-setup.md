@@ -1,49 +1,61 @@
-# Run the Twitch backend through Cloudflare
+# StreamLore on Cloudflare Workers
 
-The native Extension needs a public HTTPS backend. Cloudflare Tunnel can publish the existing Node server while SQLite and encrypted credentials stay on the host. The host must remain running; a tunnel does not move the application into Cloudflare Workers or supply an always-on server.
+Deployment target: **https://streamlore.patrickvaldivia123.workers.dev**.
 
-## Test backend
+The backend runs as a Worker with a SQLite-backed Durable Object for each channel. Twitch chat arrives through signed EventSub webhooks. The deployment does not depend on this Mac, a Cloudflare Tunnel, local SQLite files, or a permanently open WebSocket.
 
-Install `cloudflared` from the official Cloudflare distribution or Homebrew, build StreamLore, and configure `.env` with `STREAMLORE_MODE=extension`, a free local port, and the real Twitch credentials. Never expose `demo` mode: its local moderator controls are inappropriate for public hosting.
+Cloudflare has accepted the deployment. The campus network currently blocks `workers.dev`, including previously deployed Workers, so public URL reachability and live Twitch receipt have not been verified from this network. Local Worker integration checks passed. Twitch credentials and account authorization are still required.
+
+## Build and deploy
 
 ```sh
 npm ci
-npm run build
-npm start
+npm run build:worker
+npx wrangler login
+npm run deploy:worker
 ```
 
-In a second terminal, replace the port with the configured backend port:
+[`wrangler.jsonc`](../wrangler.jsonc) declares the Worker, its assets, the channel Durable Object binding, and the SQLite migration. The build creates `dist-worker/`, native assets in `dist-extension/`, and `release/streamlore-twitch-extension.zip`, targeting the Workers origin. Build output and local credentials are ignored by Git.
 
-```sh
-cloudflared tunnel --url http://127.0.0.1:8791
-```
+Use `npm run dev:worker` for local Workers development. Local `.dev.vars` values are never production Twitch credentials; do not upload generated test keys as a genuine Extension shared secret.
 
-Set `STREAMLORE_PUBLIC_URL` and `TWITCH_OAUTH_REDIRECT_URI` in `.env` to the returned HTTPS origin and its `/auth/twitch/callback` path, then restart Node. Register that exact callback on the separate Twitch OAuth application. Build the native package against the same origin:
+## Private runtime secrets
 
-```sh
-npm run build:extension -- --api-url https://YOUR-ACTUAL-TUNNEL-HOST
-```
+Set secrets with `npx wrangler secret put NAME`, or a private JSON file passed to `wrangler secret bulk`. Never put them in frontend assets, the upload ZIP, Git, screenshots, or chat.
 
-Use `https://YOUR-ACTUAL-TUNNEL-HOST/extension/` as the version's **Testing Base URI**, retaining `panel.html`, `mobile.html`, `config.html`, and `live.html`. Add the backend origin to **Allowlist for URL Fetching Domains** and allow the OAuth destination/configuration links. Open `/install` to inspect remaining setup requirements.
+| Secret | Source / purpose |
+| --- | --- |
+| `TWITCH_EXTENSION_SECRET` | The registered Extension's actual base64 shared secret; verifies Twitch Helper JWTs. |
+| `TWITCH_CLIENT_ID` | Client ID of the separate confidential broadcaster OAuth application. |
+| `TWITCH_CLIENT_SECRET` | That OAuth application's secret. |
+| `STREAMLORE_TOKEN_ENCRYPTION_KEY` | Stable base64 32-byte key for encrypted access/refresh tokens. Retain it with backups. |
+| `TWITCH_EVENTSUB_SECRET` | Random webhook signing secret, at least 32 characters. |
+| `OPENAI_API_KEY` | Optional model-assisted summaries and private lore drafts. |
 
-Quick Tunnels have changing hostnames and no uptime guarantee, stop when their process stops, and do not support SSE. Native panels use polling and can use this test path; the full companion's SSE updates need a named tunnel or another appropriate deployment. [Cloudflare Quick Tunnel limits](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+The encryption key and EventSub verification secret have been generated locally and installed in Cloudflare. The genuine Extension shared secret and separate Twitch OAuth app credentials remain outstanding. Changing the encryption key breaks access to existing stored credentials; changing the EventSub secret requires recreating subscriptions.
 
-## Stable named tunnel
+## Twitch console configuration
 
-Use an account and a domain managed in Cloudflare:
+1. Open [Extension version 0.1.0](https://dev.twitch.tv/console/extensions/m7tirdtzbocxkfacsis37lvc81i4uc/0.1.0/status).
+2. Set **Testing Base URI** to `https://streamlore.patrickvaldivia123.workers.dev/extension/`. Keep `panel.html`, `mobile.html`, `config.html`, and `live.html` as relative paths.
+3. Add `https://streamlore.patrickvaldivia123.workers.dev` to the fetching allowlist. Permit configuration/OAuth destinations and external source links as required by Twitch.
+4. Register the separate confidential OAuth app with callback **`https://streamlore.patrickvaldivia123.workers.dev/auth/twitch/callback`**. Install its credentials as Worker secrets.
+5. Install the Local Test Extension on an allowed test channel. Connect the broadcaster account through configuration.
+6. Worker connections request `user:read:chat`, `user:write:chat`, `user:manage:whispers`, `user:bot`, and `channel:bot`. The additional bot permissions allow app-token EventSub webhook subscriptions. Reconnect old chat-only grants.
+7. Test as a different viewer. Check private panel answers separately from receipt of real Twitch Whispers. Review/release are still required for public installation.
 
-```sh
-cloudflared tunnel login
-cloudflared tunnel create streamlore
-cloudflared tunnel route dns streamlore streamlore.YOUR-DOMAIN
-```
+The webhook endpoint is `/twitch/eventsub`. Signatures and timestamps are checked before routing to a channel. Message IDs, OAuth state, channel history, votes, and Whisper usage survive Worker restarts. Tokens are encrypted at rest. Hourly Durable Object alarms validate authorization; incoming chat refreshes stream metadata at most once per minute.
 
-The login needs its final domain authorization, not just a signed-in dashboard. Keep the returned certificate and tunnel credential files private. Configure the named tunnel to send only the chosen hostname to `http://127.0.0.1:8791` and return 404 for unmatched hostnames. Update the public origin, registered OAuth callback, asset-hosting URL, and fetching allowlist to the stable hostname, rebuild the ZIP, and verify them again before Hosted Test. [Cloudflare setup guide](https://developers.cloudflare.com/tunnel/get-started/)
+[Twitch webhook authentication](https://dev.twitch.tv/docs/eventsub/handling-webhook-events/), [chat subscription permissions](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/#channelchatmessage), [Durable Object SQLite storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
 
-Keep the backend and tunnel supervised on a persistent host, preserve `data/extensions`, and retain the same `STREAMLORE_TOKEN_ENCRYPTION_KEY` with database backups. This repository's synchronous SQLite and in-process chat connections require a suitable running Node host; deploying them directly as an ephemeral Worker would lose those properties.
+## Dataset and privacy
 
-## Twitch credentials and verification
+xQc's Juicer/Juicers and Caedrel's Sally are sourced starter references, separate from channel-approved lore. Their presence does not install StreamLore on those streamers' channels or authorize their accounts. Creators can hide starter references. Add and approve a test definition on your own channel when testing there.
 
-The HTTPS URL alone does not authorize Twitch. Put the registered Extension's base64 shared secret in local `.env` as `TWITCH_EXTENSION_SECRET`, and configure the separate broadcaster OAuth application's client ID/secret. The Extension ID and OAuth application ID serve different purposes. No secret belongs in the ZIP or Git.
+Panel questions are answered directly and are not added to shared channel state. Chat questions are public on Twitch; the response is a private Whisper. No private question falls back to a public bot answer. Twitch may silently drop Whispers and imposes a 40-recipient daily limit. [Whisper limitations](https://dev.twitch.tv/docs/chat/whispers/)
 
-Connect the broadcaster account with chat and Whisper scopes. Install/activate the Local Test Extension on an allowed test channel, open it as a different viewer, ask a known phrase, and verify receipt of the private answer. Check the panel separately from actual Twitch Whisper delivery. The included dataset does not grant access to xQc's or Caedrel's channel. See the [full Twitch launch guide](twitch-extension-launch.md).
+## Operating limits
+
+This is a prototype, not a load-tested service for a high-volume channel. Every subscribed chat message invokes the Worker, so Cloudflare request/CPU/storage quotas matter. Do not enable a paid plan automatically. The native panel can continue answering from approved/reference definitions without a connected chat account, once the genuine Extension secret is configured. Twitch review materials, support/legal URLs, actual installation, OAuth consent, and real Whisper delivery remain operator verification steps.
+
+The local Node/Docker backend is still available as a separate deployment option. Earlier Quick Tunnel instructions are superseded by this Workers setup.

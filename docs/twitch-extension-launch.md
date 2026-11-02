@@ -6,9 +6,9 @@ This procedure prepares the native panel and mobile experience. Building the ZIP
 
 StreamLore is registered as **StreamLore Companion**, client ID `m7tirdtzbocxkfacsis37lvc81i4uc`. Version **0.1.0** enables **Panel** and **Mobile** and is in **Local Test**. [Open the registered version](https://dev.twitch.tv/console/extensions/m7tirdtzbocxkfacsis37lvc81i4uc/0.1.0/status).
 
-The steps below remain a reproducible launch guide. Registration is complete; public HTTPS hosting, the separate broadcaster OAuth application, connected testing, review materials, Twitch review, and release remain outstanding. A Local Test lifecycle state does not establish that the Extension has run successfully inside Twitch.
+The steps below remain a reproducible launch guide. Registration and the Cloudflare Worker deployment are complete. Genuine Twitch credentials, broadcaster OAuth application setup, connected testing, review materials, Twitch review, and release remain outstanding. A Local Test lifecycle state does not establish that the Extension has run successfully inside Twitch.
 
-The registered version has `panel.html`, `mobile.html`, `config.html`, and `live.html` saved, with a 500px panel height. **Request Identity Link** is enabled, configuration uses **Custom/My Own Service**, and the required per-channel configuration string is empty. Extension chat-message capabilities remain disabled because this implementation uses broadcaster OAuth and Helix instead. The testing base URI is still Twitch's default `https://localhost:8080/`; replace it with a working testing origin before attempting a channel test.
+The registered version has `panel.html`, `mobile.html`, `config.html`, and `live.html` saved, with a 500px panel height. **Request Identity Link** is enabled, configuration uses **Custom/My Own Service**, and the required per-channel configuration string is empty. Extension chat-message capabilities remain disabled because this implementation uses broadcaster OAuth and Helix instead. The saved testing base URI was Twitch's default `https://localhost:8080/`; it still needs updating to `https://streamlore.patrickvaldivia123.workers.dev/extension/` in the console before a channel test.
 
 The supplied StreamLore logo is preserved in [`assets/streamlore-logo.png`](assets/streamlore-logo.png) and used in the repository README. It has not been uploaded to Twitch. The listing uploader requires these assets:
 
@@ -20,17 +20,19 @@ The supplied StreamLore logo is preserved in [`assets/streamlore-logo.png`](asse
 
 Upload the listing assets and provide actual author/support contacts and public legal URLs before review. Twitch currently flags the missing Privacy Notice for the mobile-enabled version.
 
+The existing registration belongs to **TheDarthh**. The current separate setup browser is signed in as **streamerlore26**, which has no registrations and is blocked by Twitch until that account enables 2FA. Use the owning account to manage the existing Extension, or complete 2FA before registering a replacement. Never substitute a locally generated testing key for Twitch's genuine shared secret.
+
 ## Private phrase answers
 
 The native panel opens on **Ask privately**. Signed viewer requests use `/api/extension/ask`; the JWT selects the channel. This returns a private panel answer without storing the question in stream history. The two sourced starter definitions are xQc’s **Juicer/Juicers** and Caedrel’s **Sally**. They are separate from moderator-approved lore, and creators can hide them.
 
 To answer questions typed in chat, reconnect the broadcaster account and allow **`user:manage:whispers`** alongside **`user:read:chat`** and **`user:write:chat`**. The sender needs a verified phone number. Test from a different viewer account, with recipient settings permitting Whispers. Ask “What is Sally?” on the corresponding configured channel, then verify the private message arrives; a successful API response alone cannot establish delivery. Test unknown terms and blocked Whispers, ensuring no answer appears publicly and chat stays connected. Twitch limits new recipients and can silently drop Whispers; use the private panel when delivery fails. [Official Whisper limitations](https://dev.twitch.tv/docs/chat/whispers/)
 
-Existing chat-only grants remain usable but cannot send Whispers until reauthorized. StreamLore must be installed and the broadcaster connected on each channel; a dataset entry does not grant access to that channel. Local previews at `/extension/panel.html?demo=1&community=xqc` and `?demo=1&community=caedrel` send no Twitch messages. The updated package and provider behavior have local coverage; live deployment, OAuth consent, and Whisper receipt still require verification.
+Existing chat-only grants remain usable but cannot send Whispers until reauthorized. StreamLore must be installed and the broadcaster connected on each channel; a dataset entry does not grant access to that channel. Local previews at `/extension/panel.html?demo=1&community=xqc` and `?demo=1&community=caedrel` send no Twitch messages. The updated package and provider behavior have local coverage, and Cloudflare accepted the Worker deployment. OAuth consent, native Twitch installation, and Whisper receipt still require verification.
 
 ## Launch process
 
-For Cloudflare-based hosting of the existing Node backend, follow [Cloudflare setup](cloudflare-setup.md). A test tunnel can provide HTTPS while the application runs on your machine; a stable production origin also requires a named tunnel/domain and a persistent running host.
+For the deployed Cloudflare Worker, follow [Cloudflare setup](cloudflare-setup.md). It uses per-channel durable SQLite storage and signed EventSub webhooks; a tunnel or running laptop is not needed. The Node/Docker steps below describe the alternative local/server deployment.
 
 **Account prerequisite:** Enable two-factor authentication on the Twitch developer account in [Security settings](https://www.twitch.tv/settings/security). Twitch blocks Extension creation until 2FA is enabled. Complete that account-security step yourself; never put verification or recovery codes in project files or chat.
 

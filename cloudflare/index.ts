@@ -97,6 +97,7 @@ export default {
 export class StreamLoreChannel extends DurableObject<Env> {
   private channelId = '';
   private runtime?: ReturnType<typeof createApp>;
+  private database?: ReturnType<typeof durableDatabase>;
   private oauth?: ReturnType<typeof createTwitchOAuthWithDatabase>;
   private server?: Server;
   private port = 0;
@@ -115,8 +116,8 @@ export class StreamLoreChannel extends DurableObject<Env> {
     if (url.pathname.startsWith('/channels/')) { url.pathname = url.pathname.replace(`/channels/${channelId}`, ''); request = new Request(url, request); }
     const response = await handleAsNodeRequest(this.port, request);
     if (this.resetAfterResponse) {
-      this.runtime?.close(); this.oauth?.close(); this.server?.close();
-      await this.ctx.storage.deleteAll(); this.runtime = undefined; this.oauth = undefined; this.server = undefined; this.ready = undefined; this.resetAfterResponse = false;
+      this.runtime?.close(); this.oauth?.close(); this.database?.close(); this.server?.close();
+      await this.ctx.storage.deleteAll(); this.runtime = undefined; this.oauth = undefined; this.database = undefined; this.server = undefined; this.ready = undefined; this.resetAfterResponse = false;
     }
     return response;
   }
@@ -124,6 +125,7 @@ export class StreamLoreChannel extends DurableObject<Env> {
   private async initialize(channelId: string) {
     this.channelId = channelId;
     const env = this.env, db = durableDatabase(this.ctx.storage);
+    this.database = db;
     this.ctx.storage.kv.put('channel-id', channelId);
     this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS eventsub_seen (id TEXT PRIMARY KEY, at INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS eventsub_seen_at ON eventsub_seen(at)');
     const store = createStoreFromDatabase(db, false);

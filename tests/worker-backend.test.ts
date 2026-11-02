@@ -53,6 +53,17 @@ test('webhook signatures bind exact payload and message identity, rejecting forg
   headers.set('Twitch-Eventsub-Message-Id', 'forged'); assert.equal(verifyEventSub(headers, body, secret, now), false);
 });
 
+test('closed Worker database handles reject delayed writes after channel removal', () => {
+  const f = storageFixture(), db = durableDatabase(f.storage), store = createStoreFromDatabase(db, false);
+  const pending = db.prepare('INSERT INTO metadata (key, value) VALUES (?, ?)');
+  db.close();
+  assert.throws(() => pending.run('resurrected', 'old data'), /closed/);
+  assert.throws(() => store.update(data => { data.captions = 'old private notes'; }), /closed/);
+  assert.equal(store.read().captions, '');
+  assert.equal(f.database.prepare('SELECT value FROM metadata WHERE key = ?').get('resurrected'), undefined);
+  f.database.close();
+});
+
 test('OAuth routing state cannot be redirected to another channel or manufactured without the backend secret', () => {
   const key = randomBytes(32).toString('base64'), state = oauthRoutingState('12345', randomBytes(32).toString('base64url'), key);
   assert.equal(oauthStateChannel(state, key), '12345');

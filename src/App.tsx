@@ -25,7 +25,7 @@ function Avatar({ small = false, name, src }: { small?: boolean; name: string; s
   useEffect(() => setFailed(false), [src]);
   return <span className={`avatar ${small ? 'small' : ''}`} aria-hidden="true">{src && !failed ? <img src={src} alt="" onError={() => setFailed(true)} /> : <span>{name.charAt(0).toUpperCase() || '?'}</span>}</span>;
 }
-function Logo() { return <span className="logo-mark"><MessageCircle size={24} fill="currentColor" strokeWidth={0} /><Sparkles size={13} className="logo-spark" /></span>; }
+function Logo() { return <span className="logo-mark" aria-hidden="true"><img src="/assets/streamlore-logo.png" alt="" /></span>; }
 function Empty({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) { return <div className="empty-state">{icon}<h3>{title}</h3><p>{children}</p></div>; }
 function Attribution({ author, reviewed = false }: { author?: ContentAuthor; reviewed?: boolean }) { return author?.login ? <small className="content-attribution">{reviewed ? 'Reviewed' : 'Added'} by {author.displayName || author.login} <span>@{author.login}</span></small> : null; }
 function VoteInTwitch({ href }: { href: string }) { return <a className="text-link twitch-vote-link" href={href} target="_blank" rel="noopener noreferrer"><Twitch size={14} /> Vote in Twitch panel <ExternalLink size={12} /></a>; }

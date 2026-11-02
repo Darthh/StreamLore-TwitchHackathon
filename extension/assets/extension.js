@@ -168,7 +168,8 @@ function section(title, description, className = 'section') { const element = no
 function buildShell() {
   root.replaceChildren();
   const header = node('header', 'brand-bar');
-  header.append(node('span', 'brand-mark', 'S'), node('strong', 'brand-name', 'StreamLore'), node('span', 'extension-label', creatorPage ? (mode === 'config' ? 'Setup' : 'Live controls') : 'Channel context'));
+  const mark = node('span', 'brand-mark'); mark.setAttribute('aria-hidden', 'true'); const logo = node('img'); logo.src = new URL('./streamlore-logo.png', import.meta.url).href; logo.alt = ''; mark.append(logo);
+  header.append(mark, node('strong', 'brand-name', 'StreamLore'), node('span', 'extension-label', creatorPage ? (mode === 'config' ? 'Setup' : 'Live controls') : 'Channel context'));
   const channel = node('div', 'channel'); channel.id = 'channel';
   const info = node('div', 'feedback'); info.id = 'feedback'; info.hidden = true;
   const waiting = section('Open inside Twitch', 'This panel uses Twitch’s secure authorization to show the right channel. Install or test it from the Twitch Extensions Manager.', 'waiting'); waiting.id = 'waiting';

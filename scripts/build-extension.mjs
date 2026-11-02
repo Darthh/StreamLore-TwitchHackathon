@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const extensionFiles = ['panel.html', 'mobile.html', 'config.html', 'live.html', 'assets/extension.js', 'assets/extension.css'];
+export const extensionFiles = ['panel.html', 'mobile.html', 'config.html', 'live.html', 'assets/extension.js', 'assets/extension.css', 'assets/streamlore-logo.png'];
 
 function isPrivateHost(hostname) {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');

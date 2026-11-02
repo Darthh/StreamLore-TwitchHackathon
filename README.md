@@ -16,7 +16,7 @@
 
 Built for the **[Codex × TwitchCon Hackathon](https://twitchcon-codex.devpost.com/)**. StreamLore gives streamers fewer repeated explanations and gives new viewers a way into the conversation: a recap of the current stream and a lasting library of channel lore.
 
-**Status: working local prototype; native Twitch Extension is registered and prerelease.** The companion app, panel/mobile views, creator controls, authentication, and upload builder are implemented. Public HTTPS hosting, separate OAuth application setup, Hosted Test, review, and release are still required before ordinary streamers can install it. Local tests do not establish a live Twitch installation.
+**Status: working local prototype; native Twitch Extension is registered and prerelease.** The companion app, panel/mobile views, creator controls, authentication, and upload builder are implemented. A Cloudflare Workers backend has been deployed; genuine Twitch credentials, connected testing, Hosted Test, review, and release are still required before ordinary streamers can install it. Local tests do not establish a live Twitch installation.
 
 <p align="center">
   <a href="#getting-started">Run the demo</a> ·
@@ -83,7 +83,7 @@ These are implemented code paths. External credentials, public hosting, and Twit
 ## See it in action
 
 <p align="center">
-  <img src="docs/assets/streamlore-companion.jpg" alt="StreamLore companion showing TheDarthh's demo profile, a catch-up recap, current objective, and channel lore" width="1000">
+  <img src="docs/assets/streamlore-companion.png" alt="StreamLore companion showing TheDarthh's demo profile, a catch-up recap, current objective, and channel lore" width="1000">
 </p>
 
 <p align="center"><em>The companion app: current-stream context and channel history in one place.</em></p>
@@ -92,7 +92,7 @@ These are implemented code paths. External credentials, public hosting, and Twit
 <summary><strong>Native Twitch panel preview</strong></summary>
 
 <p align="center">
-  <img src="docs/assets/streamlore-panel.jpg" alt="StreamLore's 320-pixel native panel preview with a catch-up recap and timeline" width="320">
+  <img src="docs/assets/streamlore-panel.png" alt="StreamLore's 320-pixel native panel preview with a catch-up recap and timeline" width="320">
 </p>
 
 This is the read-only local panel preview. It demonstrates the interface, not an approved Extension running inside Twitch. TheDarthh's [public profile picture](https://static-cdn.jtvnw.net/jtv_user_pictures/772d27eb-4c01-4ae5-815d-99ae741024f1-profile_image-600x600.png) is real; the sample stream, lore, votes, and events are fictional and labeled as demo content.
@@ -126,11 +126,11 @@ flowchart TB
 | Twitch → backend | Helper JWT signature, expiration, frontend role, and channel identity are verified server-side. Query parameters cannot choose a different channel. |
 | Viewer → content | Public responses exclude pending/rejected lore. Anonymous viewers can read; persistent native votes require a signed-in opaque identity. |
 | Creator → publishing | Native edits require a verified creator identity and connected channel account. Author/reviewer usernames come from Twitch, not submitted form fields. |
-| Channel → channel | Native channel histories and votes use separate SQLite databases. Broadcaster OAuth state is bound to the expected channel. |
+| Channel → channel | Native channel histories and votes use separate SQLite files on Node, or separate SQLite-backed Durable Objects on Workers. Broadcaster OAuth state is bound to the expected channel. |
 | Browser → credentials | Access and refresh tokens stay server-side and are encrypted at rest with AES-256-GCM. The upload ZIP contains no server credentials. |
 | AI → community | Lore suggestions remain drafts until a moderator reviews them. Chat spikes and clip URLs alone do not establish a joke's historical origin. |
 
-The full companion uses server-sent events; the native Extension polls its authenticated API every ten seconds. Native channel companion pages are read-only: edits and voting stay inside Twitch. Optional AI recap generation updates the recap directly; the lore approval gate applies to lore entries.
+The full companion uses server-sent events; the native Extension polls its authenticated API every ten seconds. The Node host uses SQLite files and EventSub WebSockets. The Cloudflare Worker uses SQLite-backed Durable Objects and signed EventSub webhooks. Native channel companion pages are read-only: edits and voting stay inside Twitch. Optional AI recap generation updates the recap directly; the lore approval gate applies to lore entries.
 
 ## How a moment becomes channel lore
 
@@ -156,7 +156,7 @@ The repository includes all four native views:
 | Configuration | [`extension/config.html`](extension/config.html) | Connect the broadcaster account and set up channel context. |
 | Live Config | [`extension/live.html`](extension/live.html) | Manage moments, review lore, and control the overlay. |
 
-**Public installation is not enabled yet.** The Extension is registered in Twitch's Developer Console. Set up the separate OAuth application, host the backend on public HTTPS, test through Twitch, and complete review and release. The [launch guide](docs/twitch-extension-launch.md) includes exact paths, environment variables, allowlists, listing copy, and release steps.
+**Public installation is not enabled yet.** The Extension is registered in Twitch's Developer Console. Configure the genuine Twitch credentials on the deployed Worker, set up the separate OAuth application, test through Twitch, and complete review and release. The [launch guide](docs/twitch-extension-launch.md) includes exact paths, environment variables, allowlists, listing copy, and release steps.
 
 | Registration detail | Value |
 | --- | --- |
@@ -176,7 +176,7 @@ npm run build:extension -- --api-url http://127.0.0.1:8787 --local-test
 npm run build:extension -- --api-url https://YOUR-BACKEND
 ```
 
-The builder writes `dist-extension/` and `release/streamlore-twitch-extension.zip`. Python 3 is required for ZIP packaging. Only seven frontend runtime files go into the archive; missing API origins, credentials in URLs, private-network production destinations, and insecure production HTTP are rejected.
+The builder writes `dist-extension/` and `release/streamlore-twitch-extension.zip`. Python 3 is required for ZIP packaging. Only eight frontend runtime files go into the archive; missing API origins, credentials in URLs, private-network production destinations, and insecure production HTTP are rejected.
 
 The install page keeps **Add to Twitch** disabled until the operator supplies a released listing. Building a ZIP does not register, approve, or release an Extension.
 
@@ -185,8 +185,8 @@ The install page keeps **Add to Twitch** disabled until the operator supplies a 
 Requires **Node.js 24+** and npm. Python 3 is needed only when building the Extension ZIP.
 
 ```sh
-git clone https://github.com/Darthh/StreamerLore-Twitch-Hackathon-2026.git
-cd StreamerLore-Twitch-Hackathon-2026
+git clone https://github.com/Darthh/StreamerLore-TwitchHackathon.git
+cd StreamerLore-TwitchHackathon
 npm ci
 npm run dev
 ```
@@ -264,11 +264,11 @@ The moderator password must contain at least 12 characters. Use a Twitch user to
 | `What is a juicer?` / `What is Sally?` | A known phrase in the current community triggers a private Whisper; it never falls back to a public answer. |
 | `!lorevote summit tax` | Vote for a moderator-reviewed nomination. |
 
-The bot uses EventSub WebSockets, validates authorization at startup and hourly, handles reconnects, deduplicates events, and throttles outgoing replies. Native OAuth accounts support encrypted refresh-token rotation and a refresh/retry after an expired-token response. The standalone `TWITCH_ACCESS_TOKEN` setup requires manual replacement when authorization expires.
+The Node bot uses EventSub WebSockets with reconnects. The Worker receives signed EventSub webhooks and persists replay protection and Whisper cooldowns. Both paths validate authorization, deduplicate events, and throttle outgoing replies. Native OAuth accounts support encrypted refresh-token rotation and a refresh/retry after an expired-token response. The standalone `TWITCH_ACCESS_TOKEN` setup requires manual replacement when authorization expires.
 
 Chat and native-panel votes use Twitch identities; the standalone browser ballot uses a signed cookie. Clearing cookies or switching browsers can bypass the standalone limit. Native votes use signed-in `U` opaque identities, while anonymous `A` identities are never stored for voting. This is a community ballot, not a high-assurance election system.
 
-`localhost` links work only on your machine. Set the public URL before connecting viewers. EventSub is an outbound connection, so this implementation does not require a Twitch webhook. [Twitch chat authentication](https://dev.twitch.tv/docs/chat/authenticating/)
+`localhost` links work only on your machine. Set the public URL before connecting viewers. The Node transport is outbound WebSocket-based. The Worker uses the signed `/twitch/eventsub` webhook endpoint and requests the additional `user:bot` and `channel:bot` permissions. [Twitch chat authentication](https://dev.twitch.tv/docs/chat/authenticating/)
 
 ## Private answers and community dataset
 
@@ -341,7 +341,7 @@ AI lore never publishes automatically. Creators review its explanation and origi
 | OBS overlay | `/overlay` or `/channels/:channelId/overlay` | Transparent output; `?preview=1` shows an idle helper. |
 | Native viewer state | `GET /api/extension/state` | Verified Twitch Helper JWT. |
 | Private phrase answer | `POST /api/extension/ask` | Verified JWT, including anonymous readers; channel comes from signed claims. |
-| Native creator state | `GET /api/extension/mod/state` | Verified creator identity and connected channel account. |
+| Native creator state | `GET /api/extension/mod/state` | Verified broadcaster/moderator identity; publishing additionally needs a connected account. |
 | Native publishing | `/api/extension/mod/*` | Verified creator and connected broadcaster account. |
 | Channel connection | `POST /api/extension/connect` | Broadcaster only; returns Twitch authorization URL. |
 | OAuth callback | `/auth/twitch/callback` | Single-use, expiring, channel-bound state. |
@@ -360,7 +360,7 @@ Health and configuration readiness are not live-provider checks. Secrets are nev
 | Native Extension | Bundled HTML, CSS, and readable JavaScript with the Twitch Extension Helper loaded first. |
 | Backend | Express 5 on Node.js 24+; server-side TypeScript stripping. |
 | Storage | Built-in Node SQLite, channel-specific history, encrypted OAuth credentials. |
-| Twitch | Helper JWTs, Helix, OAuth authorization-code flow, EventSub WebSockets. |
+| Twitch | Helper JWTs, Helix, OAuth authorization-code flow, EventSub WebSockets (Node) and signed webhooks (Workers). |
 | Optional AI | OpenAI Responses API with validated structured output. |
 | Packaging | Node build utility and Python ZIP support. |
 | Hosting preparation | Dockerfile, loopback defaults, configurable public origin and data directory. |
@@ -407,7 +407,9 @@ Additional local checks exercised production-mode HTTP routes and browser previe
 
 ## Deployment and persistence
 
-Use an always-running Node process behind public HTTPS. Native chat connections and SQLite data require a deployment model that preserves the process and storage; an ephemeral filesystem is not durable storage.
+The [Cloudflare Workers setup](docs/cloudflare-setup.md) targets **https://streamlore.patrickvaldivia123.workers.dev** with persistent channel Durable Objects and signed Twitch webhooks. Cloudflare confirms the deployment is active; this campus network blocks workers.dev, so public reachability and live Twitch delivery have not been verified here. Runtime encryption/EventSub secrets are installed; genuine Twitch credentials remain required.
+
+For the alternative Node/Docker host, use an always-running Node process behind public HTTPS. Its chat connections and SQLite files require persistent process/storage.
 
 - Public native deployments use `STREAMLORE_MODE=extension`.
 - Persist `/app/data` with the supplied [Dockerfile](Dockerfile), or mount the configured data directories on your Node host.
@@ -419,7 +421,7 @@ Default files are `data/demo.sqlite`, `data/live.sqlite`, and native channel fil
 
 The [native launch guide](docs/twitch-extension-launch.md) covers registration, identity linking, allowlists, required configuration, Hosted Test, listing fields, review, and release.
 
-For Cloudflare Tunnel setup, including the temporary HTTPS test path and stable named-tunnel configuration, follow [Cloudflare hosting](docs/cloudflare-setup.md). A tunnel publishes the running Node host; it does not move SQLite or the chat process into Workers.
+For the Workers build, secrets, console allowlists, callback, webhook permissions, and verification steps, follow [Cloudflare hosting](docs/cloudflare-setup.md). This deployment runs in Cloudflare, independently of a laptop or tunnel.
 
 ## Demo walkthrough
 
@@ -445,7 +447,10 @@ Use **Moderator → Stream controls → Reset demo** to restore the fictional fi
 | `npm run dev:web` | Start only Vite with the backend proxy. |
 | `npm test` | Run the local test suite; external provider calls are mocked. |
 | `npm run build` | Type-check and build the companion into `dist/`. |
-| `npm start` | Serve the application using the configured runtime mode. |
+| `npm start` | Serve the local Node application using the configured runtime mode. |
+| `npm run build:worker` | Type-check Worker code and build assets/ZIP against the Workers origin. |
+| `npm run dev:worker` | Run Cloudflare Workers locally with persistent development storage. |
+| `npm run deploy:worker` | Build and deploy to the configured Cloudflare account. |
 | `npm run build:extension -- --api-url https://YOUR-BACKEND` | Build native upload assets against a real public HTTPS backend. |
 | `npm run build:extension -- --api-url http://127.0.0.1:8787 --local-test` | Build an explicitly local-test-only ZIP. |
 
@@ -472,10 +477,10 @@ Generated directories, credentials, local evidence, and database files are ignor
 
 ## Current limitations
 
-- **Prerelease Extension:** registration is complete; public HTTPS hosting, separate OAuth application setup, Hosted Test, review, and release remain outstanding.
+- **Prerelease Extension:** registration and Worker deployment are complete; genuine Twitch credentials, connected testing, Hosted Test, review, and release remain outstanding.
 - **Supplied evidence:** audio capture, video fetching, and transcription are not implemented.
 - **Human review matters:** a model can misread a joke. Lore drafts require creator review, and unsupported history should stay unknown.
-- **Prototype hosting:** the backend uses synchronous SQLite and a bounded in-process channel registry. Production load, recovery, and deployment durability need further validation.
+- **Prototype hosting:** Node uses SQLite files and a bounded in-process channel registry; Workers use per-channel durable SQLite. Production load and recovery need further validation.
 - **Ballot identity:** standalone cookie votes are bypassable; native votes use verified Twitch opaque IDs. Chat and panel voting currently use separate identity namespaces.
 - **External availability:** API keys, token permissions, provider limits, and hosting affect connected features. A passing local test does not verify those services.
 - **Private chat delivery:** Whispers require each broadcaster’s authorization, cannot be sent to the sending account itself, and may be silently dropped by Twitch. The starter dataset currently covers two phrases across two communities.
